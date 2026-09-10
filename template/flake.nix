@@ -19,6 +19,11 @@
       system = "x86_64-linux";
       specialArgs = { inherit wasisabi; };
       modules = [
+        # ── The wasisabi system layer: services, programs, sane defaults ──
+        # Everything it sets is mkDefault, so anything you write in
+        # configuration.nix wins. Inert until `wasisabi.enable = true` there.
+        wasisabi.nixosModules.wasisabi
+
         ./configuration.nix
         home-manager.nixosModules.home-manager
 

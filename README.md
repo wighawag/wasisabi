@@ -118,6 +118,86 @@ nix flake new -t github:YOUR_NAME/wasisabi ~/systems/my-laptop
 sudo nixos-rebuild switch --flake ~/systems/my-laptop
 ```
 
+## Adopting on an *existing* NixOS config
+
+The template scaffolds a fresh machine, but the same two modules compose into
+a config you already have — nothing about wasi-sabi requires owning the flake.
+
+**1. Add the input**, following your nixpkgs so the module layers evaluate
+against *your* pin (they are plain modules: `pkgs` comes from whichever
+`nixosSystem` imports them, never from this repo's lock):
+
+```nix
+wasisabi = {
+  url = "github:YOUR_NAME/wasisabi";
+  inputs.nixpkgs.follows = "nixpkgs";
+};
+```
+
+**2. Import the system layer into your host's module list** — it is inert
+until you opt in, so importing it everywhere is safe:
+
+```nix
+modules = [
+  wasisabi.nixosModules.wasisabi   # inert until wasisabi.enable = true
+  ./hosts/my-laptop
+  ...
+];
+```
+
+**3. Opt in per host / per user** — system defaults in the host module, the
+home layer under your existing `home-manager.users.<name>`:
+
+```nix
+{
+  wasisabi.enable = true;                 # system layer
+  home-manager.users.me = {
+    imports = [ wasisabi.homeModules.wasisabi ];
+    wasisabi.enable = true;               # apps, dotfiles, keybinds
+  };
+}
+```
+
+Everything both layers set is `mkDefault`, so your config wins every merge,
+and each `wasisabi.*` option is a seam to override any default.
+
+Already have a `nixosConfiguration` you don't want to touch? `extendModules`
+composes the layers on top of it without editing it (this is exactly how the
+compose was verified against an independent fleet repo — see
+[`notes/composition-verification.md`](notes/composition-verification.md) for
+what was tested and the version constraints found):
+
+```nix
+myboxes.nixosConfigurations.somehost.extendModules {
+  modules = [
+    wasisabi.nixosModules.wasisabi
+    home-manager.nixosModules.home-manager
+    {
+      wasisabi.enable = true;
+      home-manager.users.me = {
+        imports = [ wasisabi.homeModules.wasisabi ];
+        wasisabi.enable = true;
+      };
+    }
+  ];
+};
+```
+
+### Version constraints (verified, not guessed)
+
+- The **system layer** (`nixosModules.wasisabi`) composes with nixpkgs 26.05
+  and home-manager release-26.05 — no skew found.
+- The **home layer** currently needs home-manager **master**: it configures
+  `wayland.windowManager.niri`, which landed in HM after the 26.05 branch and
+  does not exist in `home-manager/release-26.05`.
+- Pairing HM master with a *stable* nixpkgs pin surfaces assertion skew; the
+  one hit so far is fzf (HM master wants ≥ 0.73.0 for nushell integration,
+  26.05 ships 0.72.0). If you use a POSIX shell rather than nushell:
+  ```nix
+  programs.fzf.enableNushellIntegration = false;
+  ```
+
+
 ## The compositor
 
 niri is a **scrollable-tiling** compositor: windows sit in columns on an
@@ -201,5 +281,8 @@ already does this.
 
 - [`notes/open-items.md`](notes/open-items.md) — what has actually been verified
   against a booted VM, what has not, and the next steps in order.
+- [`notes/composition-verification.md`](notes/composition-verification.md) —
+  proof that the layers compose into an *existing* NixOS config (verified
+  against my-boxes' telemaque), and the version constraints that came out of it.
 - [`notes/compositor-alternatives.md`](notes/compositor-alternatives.md) — why
   niri and not Sway, SwayFX or Hyprland, and what swapping would cost.
