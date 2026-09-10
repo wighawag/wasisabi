@@ -40,13 +40,15 @@ lib.mkIf cfg.enable {
   # GPU accel + dconf for GTK settings + portals for Wayland desktop glue.
   hardware.graphics.enable = lib.mkDefault true;
   programs.dconf.enable = lib.mkDefault true;
-  xdg.portal = lib.mkDefault {
-    enable = true;
-    extraPortals = [
-      pkgs.xdg-desktop-portal-hyprland
-      pkgs.xdg-desktop-portal-gtk
-    ];
-  };
+
+  # Portals: the compositor module (programs.niri) already adds the gnome
+  # portal and the interface routing it wants. We only add the GTK portal,
+  # which is the generic fallback for file chooser, print and settings.
+  # Assign per-leaf rather than wrapping the namespace in one mkDefault:
+  # extraPortals is a list, so this merges with the compositor's instead of
+  # racing it.
+  xdg.portal.enable = lib.mkDefault true;
+  xdg.portal.extraPortals = [ pkgs.xdg-desktop-portal-gtk ];
 
   # Compressed-RAM swap: safe on any machine, no partition required.
   zramSwap.enable = lib.mkDefault cfg.zram.enable;

@@ -14,6 +14,20 @@
       '';
     };
 
+    animations = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
+      description = ''
+        Compositor animations (window open/close, workspace switch, strip
+        scrolling, overview).
+
+        Turn this off on machines with no accelerated GPU driver: under
+        llvmpipe every animation frame is a full-screen CPU blit, which is
+        the difference between smooth and unusable. The demo VM sets this
+        to false for exactly that reason.
+      '';
+    };
+
     terminal = lib.mkOption {
       type = lib.types.enum [ "ghostty" "foot" ];
       default = "ghostty";

@@ -21,12 +21,12 @@ or to leave it.
 
 | Role | Choice | License |
 |---|---|---|
-| Compositor | Hyprland | MPL-2.0 |
+| Compositor | niri | GPL-3.0 |
 | Login | greetd + tuigreet | GPL/MIT |
 | Bar | Waybar | MIT |
 | Launcher | fuzzel | MIT |
 | Notifications | mako | MIT |
-| Lock / idle | hyprlock + hypridle | MIT |
+| Lock / idle | swaylock + swayidle | MIT |
 | Terminal | Ghostty (or foot) | MIT |
 | Shell | zsh + starship + fzf | MIT/ISC |
 | Editors | Neovim + Helix (both ship) | Apache-2.0/MPL |
@@ -62,19 +62,52 @@ wins**. Options are the API — extend, override, or ignore any part.
 Try it in a VM (no hardware needed):
 
 ```sh
-nix flake check                          # validate
-nixos-rebuild build-vm --flake .#demo    # build the demo VM
-QEMU_OPTS="-m 4096 -smp 4 -enable-kvm -vga none -device virtio-vga-gl -display sdl,gl=on" ./result/bin/run-nixos-vm
+nix flake check              # validate (also runs `niri validate` on the config)
+./scripts/run-vm-gl.sh       # build if needed, then boot it
 ```
 
-> The default VM has **no GPU** (QEMU std VGA → llvmpipe software rendering),
-> which makes the *first* launch of a GPU-hungry app like Ghostty slow —
-> shader compilation happens on the CPU. The Nixos-generated QEMU is lean and
-> lacks VirGL; to get real GL, run through `./scripts/run-vm-gl.sh`, which
-> patches the launch script to use your host's QEMU (which usually has VirGL
-> on Linux desktops). On real hardware this never happens — real GPUs have
-> real GL.
-> Log in as `demo` / `demo`. Use `Alt+*` keybinds (host desktops eat `Super`).
+On NixOS you can skip the script and use the VM directly:
+
+```sh
+nix build .#nixosConfigurations.demo.config.system.build.vm
+./result/bin/run-nixos-vm
+```
+
+(`nixos-rebuild build-vm --flake .#demo` is the same thing, but `nixos-rebuild`
+only exists on NixOS hosts.)
+
+Log in as `demo` / `demo`. Use `Alt+*` keybinds (host desktops eat `Super`).
+
+> **The VM needs a real GPU render node, and this is not negotiable.** niri
+> refuses to run on a software EGL renderer (llvmpipe), so a VM with QEMU's
+> default emulated VGA gives you a **black screen** rather than a slow
+> desktop: niri is running fine, with a Wayland socket and working IPC, it
+> just cannot render. `hosts/demo.nix` therefore asks for
+> `-device virtio-vga-gl`, which gives the guest VirGL and a real
+> `/dev/dri/renderD128`.
+>
+> The QEMU from nixpkgs supports that device, but on a **non-NixOS host** it
+> cannot load the host's GL drivers (it looks in `/run/opengl-driver`, a
+> NixOS-only path) and dies with `egl: render node init failed`. That is what
+> `./scripts/run-vm-gl.sh` is for: it swaps in your host's QEMU, which finds
+> your host's Mesa. On NixOS you do not need it.
+>
+> The demo VM also sets `terminal = "foot"` and `animations = false`. Ghostty
+> compiles shaders on first launch, which takes about 35 seconds on a virtual
+> GPU. On real hardware neither workaround is needed.
+>
+> **The VM disk image is disposable, and `run-vm-gl.sh` recreates it every
+> run.** That is deliberate: in a NixOS build-vm the guest's `/nix/store` is an
+> overlay whose upper layer is a *tmpfs*, while `/home` and `/nix/var` live on
+> the qcow2 and survive a reboot. Boot the same image twice and the
+> home-manager profile points at store paths that were wiped with the tmpfs,
+> so activation fails with `[FAILED] Failed to start Home Manager environment`
+> and you silently get a stale session. `--keep` reuses the image if you
+> really want to.
+>
+> If the window is black through the whole boot but you can log in blind and
+> get a desktop, your host is not showing QEMU's 2D console scanout. Try
+> `QEMU_OPTS="-display gtk,gl=on"` or `QEMU_OPTS="-display sdl,gl=off"`.
 
 Adopt it on a machine:
 
@@ -85,23 +118,69 @@ nix flake new -t github:YOUR_NAME/wasisabi ~/systems/my-laptop
 sudo nixos-rebuild switch --flake ~/systems/my-laptop
 ```
 
+## The compositor
+
+niri is a **scrollable-tiling** compositor: windows sit in columns on an
+infinite horizontal strip, and opening a window never resizes the windows you
+already have. Workspaces are vertical, so the session is a grid: scroll left
+and right through a workspace, up and down between workspaces.
+
+The home-manager module runs `niri validate` on the generated config *inside
+the build*, so a bad option fails `nixos-rebuild` rather than dropping you at
+a black screen. See [`notes/compositor-alternatives.md`](notes/compositor-alternatives.md)
+for why niri and not Sway, SwayFX or Hyprland, and what it would cost to add
+one of them back.
+
 ## Keybinds (defaults, `modKey = SUPER`)
 
 > The demo VM uses `modKey = ALT` instead: your host desktop eats `Super+...`
 > inside QEMU. On real hardware, leave the default.
+
+`Super+Shift+/` shows the full cheat sheet at any time.
 
 | Keys | Action |
 |---|---|
 | `Super+Enter` | Terminal |
 | `Super+D` | Launcher (fuzzel) |
 | `Super+B` / `Super+E` | Browser / Files |
-| `Super+Q` | Close window (`Super+Shift+Q` logs out) |
-| `Super+H/J/K/L` | Focus (`+Shift` moves) |
-| `Super+1..9` | Workspaces (`+Shift` moves window) |
-| `Super+Space` / `Super+F` | Float / Fullscreen |
-| `Super+Shift+S` | Screenshot region → clipboard |
+| `Super+Q` | Close window (`Super+Shift+Q` quits, with confirmation) |
+| `Super+H/J/K/L` | Focus: left/right move between columns, up/down within one |
+| `Super+Ctrl+H/J/K/L` | Move the window (Ctrl, not Shift: `Super+Shift+L` is lock) |
+| `Super+1..9` | Workspaces (`+Shift` moves the column there) |
+| `Super+U` / `Super+I` | Workspace down / up |
+| `Super+O` | Overview |
+| `Super+Space` / `Super+F` | Float / Fullscreen (`+Shift+F` maximises the column) |
+| `Super+R` | Cycle column width (`Super+-` / `Super+=` for fine steps) |
+| `Super+[` / `Super+]` | Pull a window into / push it out of the column |
+| `Super+W` | Tabbed column display |
+| `Super+C` | Centre the column |
+| `Super+Shift+S` | Screenshot (interactive: region, window or screen) |
+| `Print` / `Alt+Print` | Screenshot whole screen / focused window |
 | `Super+Shift+R` | Toggle screen recording |
 | `Super+Shift+L` | Lock (auto-locks after 5 min idle) |
+| `Super+Shift+P` | Power off the monitors |
+| `Super+Escape` | Release keyboard shortcuts to the focused app |
+
+## Boot appearance
+
+`wasisabi.splash.enable` (default true) turns on Plymouth with a Catppuccin
+Mocha theme and quiets the boot: no kernel messages, no `[ OK ]` unit lines.
+It does **not** hide failures. Password prompts, fsck questions and the
+emergency shell still appear, so a broken boot is still visible and still
+interactive. Set it to false if you would rather watch every unit start.
+
+For the graphical splash to actually appear (rather than Plymouth falling back
+to printing the boot log), your GPU driver has to be in the initrd, which is
+hardware knowledge and therefore yours, not this module's:
+
+```nix
+boot.initrd.kernelModules = [ "amdgpu" ];   # or i915, nouveau, ...
+```
+
+Most `nixos-hardware` profiles already do this. `hosts/demo.nix` does it for
+the VM's virtual GPU. Note that the splash is **not** verified to render inside
+QEMU: there you will most likely get a quiet boot with Plymouth showing the log
+instead of the themed screen.
 
 ## Extending
 
@@ -110,7 +189,17 @@ sudo nixos-rebuild switch --flake ~/systems/my-laptop
 - Never use `mkForce` — that's how shared layers become hostile.
 - Keep hardware knowledge out of `modules/` and `home/` — that belongs to
   the user's layer (nixos-hardware etc.).
-## Session continuation
+- Keep the look in the portable layer. The Catppuccin palette in
+  `home/desktop.nix` themes the bar, launcher, notifications, lock screen and
+  GTK, none of which know what compositor they run under. Only the keybinds,
+  the Waybar workspaces module and the portal set are compositor-specific.
 
-For full context (what was validated, what to fix on real hardware, lessons learned
-from the build-out session, next steps in order) see [`CONTEXT.md`](CONTEXT.md).
+On a machine with no accelerated GPU driver, set `wasisabi.animations = false`:
+under llvmpipe every animation frame is a full-screen CPU blit. The demo VM
+already does this.
+## Notes
+
+- [`notes/open-items.md`](notes/open-items.md) — what has actually been verified
+  against a booted VM, what has not, and the next steps in order.
+- [`notes/compositor-alternatives.md`](notes/compositor-alternatives.md) — why
+  niri and not Sway, SwayFX or Hyprland, and what swapping would cost.

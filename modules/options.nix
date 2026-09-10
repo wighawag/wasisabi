@@ -19,6 +19,18 @@
       description = "greetd + tuigreet as the login manager.";
     };
 
+    splash.enable = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
+      description = ''
+        Plymouth splash screen and a quiet boot, themed to match the desktop.
+
+        This hides routine unit and kernel output, not failures: password
+        prompts, fsck questions and the emergency shell still appear. Set to
+        false if you would rather watch the boot.
+      '';
+    };
+
     zram.enable = lib.mkOption {
       type = lib.types.bool;
       default = true;

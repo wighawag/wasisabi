@@ -22,7 +22,10 @@ lib.mkIf cfg.enable {
       main = {
         font = "JetBrainsMono Nerd Font:size=11";
       };
-      colors = {
+      # foot 1.28 replaced the [colors] section with [colors-dark] and
+      # [colors-light]. A stale [colors] is not ignored: foot refuses the
+      # section and prints an error into your terminal on every launch.
+      colors-dark = {
         background = "1e1e2e";
         foreground = "cdd6f4";
       };

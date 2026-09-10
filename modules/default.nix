@@ -2,7 +2,7 @@
 
 let cfg = config.wasisabi; in
 {
-  imports = [ ./options.nix ./core.nix ./desktop.nix ./network.nix ];
+  imports = [ ./options.nix ./core.nix ./boot.nix ./desktop.nix ./network.nix ];
 
   config = lib.mkIf cfg.enable {
     # ─── The libre rule, enforced at build time ───

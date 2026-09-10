@@ -1,13 +1,21 @@
 { lib, pkgs, config, ... }:
 
-# The desktop session: Hyprland + Waybar + fuzzel + mako,
-# with locking, idle, screenshots and recording wired up. Everything is a
-# default the user can override file-by-file.
+# The desktop session: niri + Waybar + fuzzel + mako, with locking, idle,
+# screenshots and recording wired up. Everything is a default the user can
+# override file-by-file.
+#
+# niri is a scrollable-tiling compositor: windows live in columns on an
+# infinite horizontal strip, and opening a window never resizes the ones
+# already open. See notes/compositor-alternatives.md for why it is the
+# default and what the alternatives would cost.
 
 let
   cfg = config.wasisabi;
 
   # Catppuccin Mocha palette — single source of truth for the whole theme.
+  # Deliberately compositor-independent: it themes the bar, launcher,
+  # notifications, lock screen and GTK, none of which know what compositor
+  # they are running under.
   c = rec {
     base = "1e1e2e";
     mantle = "181825";
@@ -22,6 +30,14 @@ let
     peach = "fab387";
     overlay0 = "6c7086";
   };
+
+  # niri names the primary modifier once, and every bind then says "Mod".
+  # That is why the binds below never interpolate the mod key.
+  niriModKey = {
+    SUPER = "Super";
+    ALT = "Alt";
+    CTRL = "Ctrl";
+  }.${cfg.modKey};
 
   # Terminal command the binds refer to.
   termCmd =
@@ -39,15 +55,11 @@ let
     else if cfg.fileManager == "nautilus" then lib.getExe pkgs.nautilus
     else termCmd;
 
-  # Small scripts exposed as commands, so keybinds stay clean.
-  screenshotScript = pkgs.writeShellApplication {
-    name = "wasisabi-screenshot";
-    runtimeInputs = [ pkgs.grim pkgs.slurp pkgs.wl-clipboard pkgs.libnotify ];
-    text = ''
-      grim -g "$(slurp)" - | wl-copy && notify-send "Screenshot" "Copied to clipboard"
-    '';
-  };
+  lockCmd = "${lib.getExe pkgs.swaylock} -f";
 
+  # Screen recording as a command, so the keybind stays clean. Screenshots
+  # need no script: niri has a built-in screenshot UI that saves to
+  # screenshot-path and copies to the clipboard in one action.
   recordScript = pkgs.writeShellApplication {
     name = "wasisabi-record";
     runtimeInputs = [ pkgs.wf-recorder pkgs.libnotify ];
@@ -62,128 +74,174 @@ let
     '';
   };
 
-  # Workspace binds, generated.
-  wsBinds =
-    builtins.concatLists (map (i: [
-      "$mod, ${toString i}, workspace, ${toString i}"
-      "$mod SHIFT, ${toString i}, movetoworkspace, ${toString i}"
-    ]) [ 1 2 3 4 5 6 7 8 9 ]);
+  # Workspace binds, generated. niri workspaces are dynamic, so an index
+  # beyond the current count lands on the bottom-most empty workspace.
+  wsBinds = lib.listToAttrs (lib.concatMap (i: [
+    (lib.nameValuePair "Mod+${toString i}" { focus-workspace = i; })
+    (lib.nameValuePair "Mod+Shift+${toString i}" { move-column-to-workspace = i; })
+  ]) (lib.range 1 9));
 
 in
 lib.mkIf cfg.enable {
   home.packages = [
-    pkgs.waybar
     pkgs.fuzzel
-    pkgs.mako
-    pkgs.hyprlock
-    pkgs.hypridle
-    screenshotScript
     recordScript
   ];
 
-  # ─── Hyprland compositor ───
-  wayland.windowManager.hyprland = {
+  # ─── niri compositor ───
+  wayland.windowManager.niri = {
     enable = true;
-    systemd.enable = true;
-    configType = "hyprlang"; # pin the config syntax; HM master is migrating to lua
+
+    # Runs `niri validate` on the generated KDL as part of the build, so a
+    # broken option fails `nixos-rebuild` instead of dropping you into a
+    # black screen. This is the main reason niri is the default.
+    checkConfig = true;
+
     settings = {
-      # Primary modifier — from wasisabi.modKey (default SUPER; the demo VM
-      # uses ALT because host desktops swallow Super combos before QEMU sees them).
-      "$mod" = cfg.modKey;
-
-      exec-once = [
-        "waybar"
-        "mako"
-        "hypridle"
-        "hyprpolkitagent"
-        "blueman-applet"
-      ];
-
-      general = {
-        gaps_in = 6;   # 0.56+: snake_case, not kebab
-        gaps_out = 10;
-        layout = "dwindle";
+      input = {
+        # Empty xkb block: niri reads the layout from systemd-localed, so
+        # `localectl set-x11-keymap` is the single place to set it.
+        keyboard.xkb = { };
+        touchpad = {
+          tap = { };
+          natural-scroll = { };
+        };
+        # Primary modifier — from wasisabi.modKey (default SUPER; the demo
+        # VM uses ALT because host desktops swallow Super combos before
+        # QEMU sees them).
+        mod-key = niriModKey;
       };
 
-      decoration = {
-        rounding = 8;
-        blur.enabled = false; # battery over eye candy
+      layout = {
+        gaps = 8;
+        center-focused-column = "never";
+        default-column-width.proportion = 0.5;
+        background-color = "#${c.base}";
+        focus-ring = {
+          width = 2;
+          active-color = "#${c.mauve}";
+          inactive-color = "#${c.surface1}";
+        };
       };
 
-      input.touchpad = {
-        natural_scroll = true;
-        tap-to-click = true; # ignored on machines without a touchpad
+      # Without this niri logs "error loading xcursor default@24: no default
+      # icon" and falls back to a built-in cursor. It has to match
+      # home.pointerCursor below.
+      cursor = {
+        xcursor-theme = "Bibata-Modern-Ice";
+        xcursor-size = 24;
       };
 
-      misc = {
-        background_color = "rgb(${c.base})";
-        disable_splash_rendering = true; # renamed from disable_splash in 0.56
-      };
+      # Ask clients to drop their own title bars so niri can draw the focus
+      # ring around the window rather than behind it.
+      prefer-no-csd = { };
 
-      bind = [
+      screenshot-path = "~/Pictures/Screenshots/Screenshot from %Y-%m-%d %H-%M-%S.png";
+
+      # The hotkey cheat sheet is genuinely useful, but not on every login.
+      # Mod+Shift+Slash brings it up on demand.
+      hotkey-overlay.skip-at-startup = { };
+
+      binds = {
         # Launchers
-        "$mod, Return, exec, ${termCmd}"
-        "$mod, D, exec, ${lib.getExe pkgs.fuzzel}"
-        "$mod, B, exec, ${browserCmd}"
-        "$mod, E, exec, ${fileManagerCmd}"
+        "Mod+Return".spawn = termCmd;
+        "Mod+D".spawn = lib.getExe pkgs.fuzzel;
+        "Mod+B".spawn = browserCmd;
+        "Mod+E".spawn = fileManagerCmd;
 
         # Windows
-        "$mod, Q, killactive"
-        "$mod SHIFT, Q, exit"
-        "$mod, Space, togglefloating"
-        "$mod, F, fullscreen, 0"
-        "$mod, Tab, cyclenext"
-        "$mod SHIFT, Tab, cyclenext, prev"
+        "Mod+Q" = { _props.repeat = false; close-window = { }; };
+        "Mod+Shift+Q".quit = { };  # shows a confirmation dialog
+        "Mod+Space".toggle-window-floating = { };
+        "Mod+F".fullscreen-window = { };
+        "Mod+Shift+F".maximize-column = { };
+        "Mod+C".center-column = { };
+        "Mod+O" = { _props.repeat = false; toggle-overview = { }; };
+        "Mod+Shift+Slash".show-hotkey-overlay = { };
 
-        # Focus (vim keys)
-        "$mod, H, movefocus, l"
-        "$mod, J, movefocus, d"
-        "$mod, K, movefocus, u"
-        "$mod, L, movefocus, r"
-        "$mod SHIFT, H, movewindow, l"
-        "$mod SHIFT, J, movewindow, d"
-        "$mod SHIFT, K, movewindow, u"
-        "$mod SHIFT, L, movewindow, r"
+        # Focus (vim keys + arrows). In a scrollable layout, left/right move
+        # between columns and up/down move within a column.
+        "Mod+H".focus-column-left = { };
+        "Mod+J".focus-window-down = { };
+        "Mod+K".focus-window-up = { };
+        "Mod+L".focus-column-right = { };
+        "Mod+Left".focus-column-left = { };
+        "Mod+Down".focus-window-down = { };
+        "Mod+Up".focus-window-up = { };
+        "Mod+Right".focus-column-right = { };
 
-        # Screenshots / recording / lock
-        "$mod SHIFT, S, exec, wasisabi-screenshot"
-        "$mod SHIFT, R, exec, wasisabi-record"
-        "$mod SHIFT, L, exec, ${lib.getExe pkgs.hyprlock}"
-      ] ++ wsBinds;
+        # Move. Ctrl rather than Shift, because Mod+Shift+L is the lock
+        # bind: niri's own defaults use Ctrl here for the same reason.
+        "Mod+Ctrl+H".move-column-left = { };
+        "Mod+Ctrl+J".move-window-down = { };
+        "Mod+Ctrl+K".move-window-up = { };
+        "Mod+Ctrl+L".move-column-right = { };
 
-      # Mouse
-      bindm = [
-        "$mod, mouse:272, movewindow"
-        "$mod, mouse:273, resizewindow"
-      ];
+        # Column shaping — the part that has no equivalent in a classic tiler.
+        "Mod+R".switch-preset-column-width = { };
+        "Mod+Minus".set-column-width = "-10%";
+        "Mod+Equal".set-column-width = "+10%";
+        "Mod+BracketLeft".consume-or-expel-window-left = { };
+        "Mod+BracketRight".consume-or-expel-window-right = { };
+        "Mod+W".toggle-column-tabbed-display = { };
 
-      # Media keys
-      bindl = [
-        ", XF86AudioPlay, exec, ${lib.getExe pkgs.playerctl} play-pause"
-        ", XF86AudioNext, exec, ${lib.getExe pkgs.playerctl} next"
-        ", XF86AudioPrev, exec, ${lib.getExe pkgs.playerctl} previous"
-        ", XF86AudioMute, exec, ${lib.getExe pkgs.pamixer} -t"
-        ", XF86AudioMicMute, exec, ${lib.getExe pkgs.pamixer} --default-source -t"
-      ];
+        # Workspaces (vertical), beyond the numbered binds below.
+        "Mod+U".focus-workspace-down = { };
+        "Mod+I".focus-workspace-up = { };
 
-      # Repeatable keys (volume/brightness)
-      bindel = [
-        ", XF86AudioRaiseVolume, exec, ${lib.getExe pkgs.pamixer} -i 5"
-        ", XF86AudioLowerVolume, exec, ${lib.getExe pkgs.pamixer} -d 5"
-        ", XF86MonBrightnessUp, exec, ${lib.getExe pkgs.brightnessctl} set +5%"
-        ", XF86MonBrightnessDown, exec, ${lib.getExe pkgs.brightnessctl} set 5%-"
-      ];
-    };
+        # Screenshots: built-in, interactive, saves to disk and clipboard.
+        "Mod+Shift+S".screenshot = { };
+        "Print".screenshot-screen = { };
+        "Alt+Print".screenshot-window = { };
+
+        # Recording / lock / monitors off
+        "Mod+Shift+R".spawn = lib.getExe recordScript;
+        "Mod+Shift+L".spawn-sh = lockCmd;
+        "Mod+Shift+P".power-off-monitors = { };
+
+        # Escape hatch for apps that grab the keyboard (remote desktop, KVM).
+        "Mod+Escape" = {
+          _props.allow-inhibiting = false;
+          toggle-keyboard-shortcuts-inhibit = { };
+        };
+
+        # Media keys — allow-when-locked so they work on the lock screen.
+        "XF86AudioPlay" = { _props.allow-when-locked = true; spawn = [ (lib.getExe pkgs.playerctl) "play-pause" ]; };
+        "XF86AudioNext" = { _props.allow-when-locked = true; spawn = [ (lib.getExe pkgs.playerctl) "next" ]; };
+        "XF86AudioPrev" = { _props.allow-when-locked = true; spawn = [ (lib.getExe pkgs.playerctl) "previous" ]; };
+        "XF86AudioMute" = { _props.allow-when-locked = true; spawn = [ (lib.getExe pkgs.pamixer) "-t" ]; };
+        "XF86AudioMicMute" = { _props.allow-when-locked = true; spawn = [ (lib.getExe pkgs.pamixer) "--default-source" "-t" ]; };
+
+        # Volume / brightness — these repeat while held.
+        "XF86AudioRaiseVolume" = { _props.allow-when-locked = true; spawn = [ (lib.getExe pkgs.pamixer) "-i" "5" ]; };
+        "XF86AudioLowerVolume" = { _props.allow-when-locked = true; spawn = [ (lib.getExe pkgs.pamixer) "-d" "5" ]; };
+        "XF86MonBrightnessUp" = { _props.allow-when-locked = true; spawn = [ (lib.getExe pkgs.brightnessctl) "set" "+5%" ]; };
+        "XF86MonBrightnessDown" = { _props.allow-when-locked = true; spawn = [ (lib.getExe pkgs.brightnessctl) "set" "5%-" ]; };
+      } // wsBinds;
+    }
+    # Animations are a full-screen redraw. On a GPU that is free; under
+    # llvmpipe (the demo VM, or a machine with no accelerated driver) it is
+    # the difference between smooth and unusable.
+    // lib.optionalAttrs (!cfg.animations) { animations.off = { }; };
   };
+
+  # ─── Session services ───
+  # All of these are plain systemd user units bound to graphical-session
+  # .target, which niri-session starts. Nothing is spawned by the compositor,
+  # so the session survives restarting the compositor and each piece can be
+  # replaced without touching the niri config.
+  services.polkit-gnome.enable = true;   # authentication agent
+  services.blueman-applet.enable = true;
 
   # ─── Waybar ───
   programs.waybar = {
     enable = true;
+    systemd.enable = true;
     settings.mainBar = {
       layer = "top";
       position = "top";
       height = 32;
-      modules-left = [ "hyprland/workspaces" ];
+      modules-left = [ "niri/workspaces" ];
       modules-center = [ "clock" ];
       modules-right = [
         "tray"
@@ -192,7 +250,7 @@ lib.mkIf cfg.enable {
         "pulseaudio"
         "battery"
       ];
-      "hyprland/workspaces".format = "{name}";
+      "niri/workspaces".format = "{index}";
       clock.format = "{:%H:%M}";
       bluetooth.format = "  {status}";
       bluetooth.format-connected = " {num_connections}";
@@ -205,7 +263,7 @@ lib.mkIf cfg.enable {
         default = [ "🔈" "🔉" "🔊" ];
       };
       battery.format = "{capacity}% {icon}";
-      battery.format-icons = [ "" "" "" "" "" "" ];
+      battery.format-icons = [ "" "" "" "" "" "" ];
       battery.states = {
         warning = 20;
         critical = 10;
@@ -226,8 +284,14 @@ lib.mkIf cfg.enable {
         padding: 0 8px;
         color: #${c.overlay0};
       }
-      #workspaces button.active {
+      #workspaces button.focused {
         color: #${c.mauve};
+      }
+      #workspaces button.active {
+        color: #${c.subtext1};
+      }
+      #workspaces button.urgent {
+        color: #${c.red};
       }
       #battery.warning { color: #${c.peach}; }
       #battery.critical { color: #${c.red}; }
@@ -254,7 +318,7 @@ lib.mkIf cfg.enable {
   xdg.configFile."fuzzel/fuzzel.ini".text = ''
     [main]
     font=JetBrainsMono Nerd Font:size=11
-    terminal=${lib.getExe pkgs.ghostty}
+    terminal=${termCmd}
     layer=top
     [colors]
     background=${c.base}ee
@@ -266,47 +330,64 @@ lib.mkIf cfg.enable {
   '';
 
   # ─── Lock screen ───
-  xdg.configFile."hyprlock/hyprlock.conf".text = ''
-    background {
-      monitor =
-      path = rgb(${c.base})
-    }
-    input-field {
-      monitor =
-      size = 300, 42
-      outline thickness = 2
-      outer_color = rgb(${c.surface0})
-      inner_color = rgb(${c.surface1})
-      font_color = rgb(${c.text})
-    }
-    label {
-      monitor =
-      text = Locked
-      color = rgb(${c.subtext1})
-      font_size = 24
-      position = 0, 80
-    }
-  '';
+  # swaylock speaks ext-session-lock-v1, so it is not tied to any compositor.
+  # It needs security.pam.services.swaylock on the system side (see
+  # ../modules/desktop.nix) or it can never accept your password.
+  programs.swaylock = {
+    enable = true;
+    settings = {
+      daemonize = true;
+      show-failed-attempts = true;
+      indicator-radius = 100;
+      indicator-thickness = 8;
+      color = c.base;
+      inside-color = c.surface0;
+      inside-ver-color = c.surface0;
+      inside-wrong-color = c.surface0;
+      ring-color = c.surface1;
+      ring-ver-color = c.blue;
+      ring-wrong-color = c.red;
+      key-hl-color = c.mauve;
+      bs-hl-color = c.red;
+      text-color = c.text;
+      text-ver-color = c.text;
+      text-wrong-color = c.text;
+      line-color = "00000000";
+      separator-color = "00000000";
+    };
+  };
 
   # ─── Idle: lock at 5min, screen off at 10, suspend at 15 ───
-  xdg.configFile."hypridle/hypridle.conf".text = ''
-    general {
-      ignore_dbus_inhibit = false
-    }
-    listener {
-      timeout = 300
-      on-timeout = ${lib.getExe pkgs.hyprlock}
-    }
-    listener {
-      timeout = 600
-      on-timeout = hyprctl dispatch dpms off
-      on-resume = hyprctl dispatch dpms on
-    }
-    listener {
-      timeout = 900
-      on-timeout = systemctl suspend
-    }
-  '';
+  # swayidle speaks ext-idle-notify-v1, also compositor-independent. The
+  # `lock` and `before-sleep` events mean loginctl lock-session and suspend
+  # both go through the same locker.
+  services.swayidle = {
+    enable = true;
+    timeouts = [
+      { timeout = 300; command = lockCmd; }
+      {
+        timeout = 600;
+        command = "${lib.getExe pkgs.niri} msg action power-off-monitors";
+      }
+      { timeout = 900; command = "${pkgs.systemd}/bin/systemctl suspend"; }
+    ];
+    events = {
+      before-sleep = lockCmd;
+      lock = lockCmd;
+    };
+  };
+
+  # ─── Cursor ───
+  # home.pointerCursor (rather than gtk.cursorTheme alone) also exports
+  # XCURSOR_THEME/XCURSOR_SIZE and links the theme into ~/.icons, which is
+  # what the compositor itself reads.
+  home.pointerCursor = {
+    enable = true;
+    name = "Bibata-Modern-Ice";
+    package = pkgs.bibata-cursors;
+    size = 24;
+    gtk.enable = true;
+  };
 
   # ─── GTK theme ───
   gtk = {
@@ -318,10 +399,6 @@ lib.mkIf cfg.enable {
     iconTheme = {
       name = "Papirus-Dark";
       package = pkgs.papirus-icon-theme;
-    };
-    cursorTheme = {
-      name = "Bibata-Modern-Ice";
-      package = pkgs.bibata-cursors;
     };
   };
 }

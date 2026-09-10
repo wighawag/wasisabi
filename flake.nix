@@ -34,6 +34,14 @@
             # QEMU on a desktop host: your compositor eats Super+key before the
             # VM can see it. Use ALT in the VM; back to SUPER on real hardware.
             wasisabi.modKey = "ALT";
+            # The demo VM renders through VirGL, which is a real GL stack but
+            # not a fast one. Animations are full-screen redraws; turn them off.
+            wasisabi.animations = false;
+            # Ghostty compiles its shaders on first launch, which on a virtual
+            # GPU takes ~35s before a window appears. foot is CPU-rendered and
+            # opens instantly, which is what you want when kicking the tyres.
+            # On real hardware the default (ghostty) is fine.
+            wasisabi.terminal = "foot";
           };
         })
         ./hosts/demo.nix
