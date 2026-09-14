@@ -40,8 +40,16 @@ let
   }.${cfg.modKey};
 
   # Terminal command the binds refer to.
+  # Is the cohesive shell in charge, or the five single-purpose daemons?
+  noctalia = cfg.shell == "noctalia";
+
+  # Every Noctalia action is `noctalia msg <command>`; the binary is on PATH
+  # from home/noctalia.nix. Spelled through a helper so a rename is one edit.
+  noc = c: "noctalia msg ${c}";
+
   termCmd =
     if cfg.terminal == "ghostty" then lib.getExe pkgs.ghostty
+    else if cfg.terminal == "kitty" then lib.getExe pkgs.kitty
     else lib.getExe pkgs.foot;
 
   browserCmd =
@@ -53,9 +61,18 @@ let
   fileManagerCmd =
     if cfg.fileManager == "thunar" then lib.getExe pkgs.thunar
     else if cfg.fileManager == "nautilus" then lib.getExe pkgs.nautilus
+    # yazi is a TUI: it opens IN the terminal rather than as its own window.
+    else if cfg.fileManager == "yazi" then "${termCmd} -e ${lib.getExe pkgs.yazi}"
     else termCmd;
 
-  lockCmd = "${lib.getExe pkgs.swaylock} -f";
+  # The shell owns locking when it is in charge; swaylock only exists in the
+  # classic stack, and binding a swaylock that is not installed would be a
+  # keybind that silently does nothing.
+  lockCmd =
+    if noctalia then noc "session lock"
+    else "${lib.getExe pkgs.swaylock} -f";
+
+  launcherCmd = if noctalia then noc "panel-toggle launcher" else lib.getExe pkgs.fuzzel;
 
   # Screen recording as a command, so the keybind stays clean. Screenshots
   # need no script: niri has a built-in screenshot UI that saves to
@@ -83,10 +100,8 @@ let
 
 in
 lib.mkIf cfg.enable {
-  home.packages = [
-    pkgs.fuzzel
-    recordScript
-  ];
+  home.packages = [ recordScript ]
+    ++ lib.optional (!noctalia) pkgs.fuzzel;
 
   # ─── niri compositor ───
   wayland.windowManager.niri = {
@@ -145,7 +160,7 @@ lib.mkIf cfg.enable {
       binds = {
         # Launchers
         "Mod+Return".spawn = termCmd;
-        "Mod+D".spawn = lib.getExe pkgs.fuzzel;
+        "Mod+D".spawn-sh = launcherCmd;
         "Mod+B".spawn = browserCmd;
         "Mod+E".spawn = fileManagerCmd;
 
@@ -217,7 +232,18 @@ lib.mkIf cfg.enable {
         "XF86AudioLowerVolume" = { _props.allow-when-locked = true; spawn = [ (lib.getExe pkgs.pamixer) "-d" "5" ]; };
         "XF86MonBrightnessUp" = { _props.allow-when-locked = true; spawn = [ (lib.getExe pkgs.brightnessctl) "set" "+5%" ]; };
         "XF86MonBrightnessDown" = { _props.allow-when-locked = true; spawn = [ (lib.getExe pkgs.brightnessctl) "set" "5%-" ]; };
-      } // wsBinds;
+      }
+      // wsBinds
+      # The surfaces that only exist when the cohesive shell is in charge.
+      # Deliberately NOT invented: these are upstream's documented IPC
+      # commands (docs.noctalia.dev/noctalia/ipc).
+      // lib.optionalAttrs noctalia {
+        "Mod+S".spawn-sh = noc "panel-toggle control-center";
+        "Mod+Comma".spawn-sh = noc "settings-toggle";
+        "Mod+V".spawn-sh = noc "panel-toggle clipboard";
+        "Mod+Period".spawn-sh = noc "panel-toggle emoji";
+        "Alt+Tab".spawn-sh = noc "window-switcher";
+      };
     }
     # Animations are a full-screen redraw. On a GPU that is free; under
     # llvmpipe (the demo VM, or a machine with no accelerated driver) it is
@@ -234,7 +260,7 @@ lib.mkIf cfg.enable {
   services.blueman-applet.enable = true;
 
   # ─── Waybar ───
-  programs.waybar = {
+  programs.waybar = lib.mkIf (!noctalia) {
     enable = true;
     systemd.enable = true;
     settings.mainBar = {
@@ -301,7 +327,7 @@ lib.mkIf cfg.enable {
   };
 
   # ─── Notifications ───
-  services.mako = {
+  services.mako = lib.mkIf (!noctalia) {
     enable = true;
     settings = {
       anchor = "top-right";
@@ -315,7 +341,7 @@ lib.mkIf cfg.enable {
   };
 
   # ─── Launcher ───
-  xdg.configFile."fuzzel/fuzzel.ini".text = ''
+  xdg.configFile."fuzzel/fuzzel.ini" = lib.mkIf (!noctalia) { text = ''
     [main]
     font=JetBrainsMono Nerd Font:size=11
     terminal=${termCmd}
@@ -327,13 +353,13 @@ lib.mkIf cfg.enable {
     selection=${c.surface0}ff
     selection-text=${c.text}ff
     border=${c.blue}ff
-  '';
+  ''; };
 
   # ─── Lock screen ───
   # swaylock speaks ext-session-lock-v1, so it is not tied to any compositor.
   # It needs security.pam.services.swaylock on the system side (see
   # ../modules/desktop.nix) or it can never accept your password.
-  programs.swaylock = {
+  programs.swaylock = lib.mkIf (!noctalia) {
     enable = true;
     settings = {
       daemonize = true;
@@ -361,7 +387,7 @@ lib.mkIf cfg.enable {
   # swayidle speaks ext-idle-notify-v1, also compositor-independent. The
   # `lock` and `before-sleep` events mean loginctl lock-session and suspend
   # both go through the same locker.
-  services.swayidle = {
+  services.swayidle = lib.mkIf (!noctalia) {
     enable = true;
     timeouts = [
       { timeout = 300; command = lockCmd; }

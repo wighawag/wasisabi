@@ -16,6 +16,30 @@ lib.mkIf cfg.enable {
     };
   };
 
+  # kitty: GPU-accelerated like ghostty, but with a config format and a theme
+  # ecosystem that predate it. Its themes ship as a separate package, so the
+  # palette is set here explicitly rather than named.
+  programs.kitty = lib.mkIf (cfg.terminal == "kitty") {
+    enable = true;
+    font = {
+      name = "JetBrainsMono Nerd Font";
+      size = 11;
+    };
+    settings = {
+      background_opacity = "0.95";
+      confirm_os_window_close = 0;
+      copy_on_select = "clipboard";
+      # Catppuccin Mocha, matching ghostty's bundled theme and foot's colours
+      # above, so switching terminals does not switch palettes.
+      background = "#1e1e2e";
+      foreground = "#cdd6f4";
+      selection_background = "#585b70";
+      selection_foreground = "#cdd6f4";
+      cursor = "#f5e0dc";
+      url_color = "#89b4fa";
+    };
+  };
+
   programs.foot = lib.mkIf (cfg.terminal == "foot") {
     enable = true;
     settings = {

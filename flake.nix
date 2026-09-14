@@ -7,16 +7,32 @@
       url = "github:nix-community/home-manager";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+
+    # The Noctalia shell, as SOURCE not as a flake: its own flake pins a
+    # separate nixos-unstable, which would put a second nixpkgs in every
+    # consumer's closure and let the shell's GL stack drift from the
+    # compositor's. nix/package.nix is a plain callPackage file, so we build
+    # it against our pkgs. See home/noctalia.nix.
+    noctalia = {
+      url = "github:noctalia-dev/noctalia";
+      flake = false;
+    };
   };
 
-  outputs = { self, nixpkgs, home-manager, ... }: {
+  outputs = { self, nixpkgs, home-manager, noctalia, ... }: {
     # System-level layer: services, programs, sane hardware-agnostic defaults.
     # Knows nothing about your disks, drivers or CPU.
     nixosModules.wasisabi = import ./modules;
 
     # User-level layer: apps, dotfiles, keybinds, theming.
     # Also usable standalone with home-manager on any distro.
-    homeModules.wasisabi = import ./home;
+    homeModules.wasisabi = {
+      imports = [ ./home ];
+      # Injected rather than fetched inside the module, so the pin lives in
+      # flake.lock (updatable with `nix flake update noctalia`) and consumers
+      # need to wire nothing.
+      _module.args.noctaliaSrc = noctalia;
+    };
 
     # A demo machine proving the layers are hardware-agnostic:
     #   nixos-rebuild build-vm --flake .#demo   → boots the whole desktop in QEMU

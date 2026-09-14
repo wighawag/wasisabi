@@ -4,6 +4,28 @@
   options.wasisabi = {
     enable = lib.mkEnableOption "the wasisabi home layer (apps + dotfiles)";
 
+    shell = lib.mkOption {
+      type = lib.types.enum [ "noctalia" "classic" ];
+      default = "noctalia";
+      description = ''
+        Which desktop SHELL owns the bar, launcher, notifications, lock
+        screen, wallpaper and OSDs.
+
+        "noctalia" is one cohesive shell (MIT, native Wayland/GLES) that owns
+        all of those surfaces, configured through its own settings GUI with
+        hot reload. This module SEEDS its config once and then leaves it
+        alone: the app owns the file, so the GUI can actually save.
+
+        "classic" is the original stack of single-purpose pieces: Waybar +
+        fuzzel + mako + swaylock + swayidle. More parts to keep visually
+        consistent, but each is independently replaceable and every setting
+        is declarative.
+
+        The compositor is niri either way; this option changes only the
+        shell layer around it.
+      '';
+    };
+
     modKey = lib.mkOption {
       type = lib.types.enum [ "SUPER" "ALT" "CTRL" ];
       default = "SUPER";
@@ -29,7 +51,7 @@
     };
 
     terminal = lib.mkOption {
-      type = lib.types.enum [ "ghostty" "foot" ];
+      type = lib.types.enum [ "ghostty" "foot" "kitty" ];
       default = "ghostty";
       description = "Terminal emulator.";
     };
@@ -47,9 +69,22 @@
     };
 
     fileManager = lib.mkOption {
-      type = lib.types.enum [ "thunar" "nautilus" "none" ];
+      type = lib.types.enum [ "thunar" "nautilus" "yazi" "none" ];
       default = "thunar";
-      description = "Graphical file manager.";
+      description = ''
+        File manager, and the one bound to Mod+E.
+
+        "yazi" is the odd one and worth understanding before picking it: it
+        is a TUI, so it opens IN THE TERMINAL and has no XDG portal
+        implementation. That does NOT cost you a file chooser -- "open a
+        file" from Firefox is answered by the GTK PORTAL, which brings its
+        own dialog and never involved Thunar (see modules/desktop.nix, where
+        niri's `useNautilus` is off for exactly this reason). So choosing
+        yazi means "no GUI file manager installed", not "no way to pick a
+        file".
+
+        "none" installs nothing and leaves Mod+E opening a terminal.
+      '';
     };
 
     apps.media = lib.mkOption {

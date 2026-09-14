@@ -25,6 +25,9 @@ lib.mkIf cfg.enable {
       pkgs.tumbler  # thumbnails
     ])
     ++ (lib.optionals (cfg.fileManager == "nautilus") [ pkgs.nautilus ])
+    # yazi is a TUI file manager: no window of its own, no portal. See the
+    # option's description for why that costs no file chooser.
+    ++ (lib.optionals (cfg.fileManager == "yazi") [ pkgs.yazi ])
     # Optional app groups
     ++ (lib.optionals cfg.apps.media [ pkgs.mpv pkgs.imv ])
     ++ (lib.optionals cfg.apps.office [ pkgs.libreoffice ])
