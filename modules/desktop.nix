@@ -3,7 +3,20 @@
 # The session: niri compositor, greetd login, Wayland CLI tools.
 # User-facing apps and dotfiles live in the home-manager layer (../home).
 
-let cfg = config.wasisabi; in
+let
+  cfg = config.wasisabi;
+
+  noctaliaGreeter = cfg.greetd.enable && cfg.greetd.greeter == "noctalia";
+
+  # greetd launches `noctalia-greeter-session` -- the WRAPPER, not the
+  # `noctalia-greeter` binary: the wrapper starts the bundled wlroots
+  # compositor and runs the greeter inside it. Pointing greetd at the bare
+  # executable gives a greeter with no compositor to draw on.
+  greeterCmd =
+    if noctaliaGreeter
+    then lib.getExe' pkgs.noctalia-greeter "noctalia-greeter-session"
+    else "${lib.getExe pkgs.tuigreet} --time --remember --remember-session --cmd '${lib.getExe' pkgs.systemd "systemd-cat"} --identifier=niri-session ${lib.getExe' pkgs.niri "niri-session"}'";
+in
 lib.mkIf cfg.enable {
   # niri — a scrollable-tiling compositor. The nixpkgs module does the
   # session wiring for us: the session package for display managers, the
@@ -35,32 +48,31 @@ lib.mkIf cfg.enable {
     createHome = lib.mkDefault true;
   };
 
-  # The graphical greeter, from nixpkgs rather than from another flake input:
-  # the module lives in nixos/modules/services/display-managers/, enables
-  # greetd, Polkit and AccountsService itself, and points greetd at the
-  # packaged `noctalia-greeter-session` wrapper. Enabling it is therefore the
-  # WHOLE wiring -- which is also why the tuigreet block below must not fight
-  # it: its per-leaf mkDefaults yield to this module's definitions.
-  services.displayManager.noctalia-greeter.enable =
-    lib.mkIf (cfg.greetd.enable && cfg.greetd.greeter == "noctalia") true;
+  # The graphical greeter's own bits. WIRED HERE RATHER THAN VIA
+  # `services.displayManager.noctalia-greeter`, and that is not
+  # not-invented-here: that module only exists in nixpkgs UNSTABLE, while the
+  # PACKAGE is in release channels too (verified on 26.05). Depending on the
+  # module would make this option explode with "did you mean cosmic-greeter?"
+  # on any consumer pinning a release. What the module does is small and
+  # stable: a state dir, accountsservice, polkit, and greetd's command.
+  services.accounts-daemon.enable = lib.mkIf noctaliaGreeter (lib.mkDefault true);
+
+  # The greeter keeps state (last session, last user) here. Without the
+  # directory it starts but cannot remember anything.
+  systemd.tmpfiles.settings."10-noctalia-greeter" = lib.mkIf noctaliaGreeter {
+    "/var/lib/noctalia-greeter".d = {
+      user = "greeter";
+      group = "greeter";
+      mode = "0750";
+    };
+  };
 
   services.greetd = lib.mkIf cfg.greetd.enable {
     enable = lib.mkDefault true;
     # Only the text greeter wants the VT wiring; the graphical one brings its
     # own compositor.
     useTextGreeter = lib.mkDefault (cfg.greetd.greeter == "tuigreet");
-    # ONLY when tuigreet is the chosen greeter. `optionalAttrs`, not `mkIf`:
-    # this crosses into the TOML-typed `settings` option, where the module
-    # system has already bitten us once (see the note below about a whole
-    # namespace wrapped in mkDefault being silently dropped). optionalAttrs is
-    # plain Nix and resolves before the module system ever sees it.
-    #
-    # Without the guard, this and the noctalia-greeter module both define
-    # settings.default_session.command at the same priority and the build
-    # fails with a conflict -- which is the right failure, but not one to make
-    # the operator resolve by hand.
-    settings = lib.optionalAttrs (cfg.greetd.greeter == "tuigreet") {
-    default_session = {
+    settings.default_session = {
       # NOTE: assign sub-options directly with per-leaf mkDefault — wrapping
       # the whole namespace in one mkDefault gets silently dropped by the
       # module system when it crosses into the TOML-typed `settings` option.
@@ -75,9 +87,8 @@ lib.mkIf cfg.enable {
       # argument list, which systemd warns about. systemd-cat sends that to
       # the journal instead of the console: still diagnosable with
       # `journalctl -t niri-session`, no longer visible mid-login.
-      command = lib.mkDefault "${lib.getExe pkgs.tuigreet} --time --remember --remember-session --cmd '${lib.getExe' pkgs.systemd "systemd-cat"} --identifier=niri-session ${lib.getExe' pkgs.niri "niri-session"}'";
+      command = lib.mkDefault greeterCmd;
       user = lib.mkDefault "greeter";
-    };
     };
   };
 
@@ -87,7 +98,7 @@ lib.mkIf cfg.enable {
   # niri has a built-in screenshot UI, but grim/slurp stay: they are what
   # other tools shell out to, and niri implements wlr-screencopy v3 so they
   # work unmodified.
-  environment.systemPackages = with pkgs; [
+  environment.systemPackages = (with pkgs; [
     grim            # screenshots
     slurp           # region picker
     wl-clipboard    # clipboard
@@ -95,5 +106,8 @@ lib.mkIf cfg.enable {
     pamixer
     playerctl
     wf-recorder
-  ];
+  ])
+  # The greeter, so `noctalia-greeter-print-greetd-config` and friends are
+  # reachable for troubleshooting a login that will not come up.
+  ++ lib.optional noctaliaGreeter pkgs.noctalia-greeter;
 }
