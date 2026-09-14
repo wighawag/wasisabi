@@ -16,7 +16,31 @@
     greetd.enable = lib.mkOption {
       type = lib.types.bool;
       default = true;
-      description = "greetd + tuigreet as the login manager.";
+      description = "greetd as the login manager.";
+    };
+
+    greetd.greeter = lib.mkOption {
+      type = lib.types.enum [ "noctalia" "tuigreet" ];
+      default = "noctalia";
+      description = ''
+        Which greeter greetd launches.
+
+        "noctalia" is the graphical greeter from the Noctalia project
+        (packaged in nixpkgs): user and session pickers, password entry and a
+        colour-scheme chooser, in the same visual language as the shell. It
+        brings its OWN bundled wlroots compositor, so it needs a GPU with a
+        render node, exactly like the session it logs you into.
+
+        "tuigreet" is a text greeter that runs on the VT. Uglier, and the one
+        that still works when the graphics stack is the thing that is broken
+        -- which is why it stays available rather than being deleted.
+
+        This pairs with the HOME-layer `wasisabi.shell` option but is
+        deliberately independent of it: the greeter runs as its own user
+        before any home configuration exists, so the two cannot read each
+        other and a fleet may reasonably want a text greeter with a graphical
+        session or the reverse.
+      '';
     };
 
     splash.enable = lib.mkOption {
