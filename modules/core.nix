@@ -14,13 +14,28 @@ lib.mkIf cfg.enable {
   time.timeZone = lib.mkDefault cfg.timeZone;
   i18n.defaultLocale = lib.mkDefault cfg.locale;
 
-  # Fonts: a monospace Noto fallback for CJK/emoji so nothing renders as tofu.
-  fonts.packages = lib.mkDefault (with pkgs; [
+  # Fonts: the nerd font the home layer names (ghostty, foot, waybar all ask
+  # for "JetBrainsMono Nerd Font"), plus a Noto fallback for CJK/emoji so
+  # nothing renders as tofu.
+  #
+  # NOT mkDefault, and that is the whole point of this comment. nixpkgs
+  # defines its own base font list (dejavu, liberation, noto, gyre, ...) at
+  # NORMAL priority, and `fonts.packages` is a list: a normal-priority
+  # definition does not merge with a mkDefault one, it DISCARDS it. So with
+  # mkDefault here the nerd font silently never got installed, fontconfig
+  # substituted DejaVu Sans, and terminals rendered a PROPORTIONAL font --
+  # visibly ragged, with foot warning "font does not appear to be monospace"
+  # on every launch. The demo VM had it too.
+  #
+  # Declared at normal priority these MERGE with the nixpkgs list, which is
+  # what a list option should do. A consumer who genuinely wants to drop them
+  # still can, with mkForce.
+  fonts.packages = with pkgs; [
     nerd-fonts.jetbrains-mono
     noto-fonts
     noto-fonts-cjk-sans
-    noto-fonts-emoji
-  ]);
+    noto-fonts-color-emoji
+  ];
 
   # Modern audio stack (PulseAudio API + ALSA + JACK compat).
   services.pipewire = lib.mkDefault {
