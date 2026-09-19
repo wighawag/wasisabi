@@ -49,8 +49,22 @@ lib.mkIf cfg.enable {
   services = {
     gvfs.enable = lib.mkDefault true;     # trash/mounts for file managers
     upower.enable = lib.mkDefault true;    # battery reporting
-    printing.enable = lib.mkDefault true;  # CUPS
+    printing.enable = lib.mkDefault cfg.printing.enable;  # CUPS
   };
+
+  # Avahi IS the discovery half of printing, not a nicety beside it: with no
+  # declarative queue, DNS-SD is the ONLY way CUPS learns a printer exists.
+  # Without this, CUPS runs happily and the print dialog is simply empty, which
+  # reads as "printing is broken" and sends people looking for a driver -- the
+  # exact dead end driverless setup is meant to avoid.
+  #
+  # nssmdns4 additionally resolves <name>.local through NSS, so the printer is
+  # reachable by identity rather than by whatever address DHCP handed it today.
+  services.avahi = lib.mkIf cfg.printing.enable (lib.mkDefault {
+    enable = true;
+    nssmdns4 = true;
+    openFirewall = true;  # UDP 5353, or nothing is ever discovered
+  });
 
   # GPU accel + dconf for GTK settings + portals for Wayland desktop glue.
   hardware.graphics.enable = lib.mkDefault true;
