@@ -14,6 +14,27 @@ lib.mkIf cfg.enable {
   time.timeZone = lib.mkDefault cfg.timeZone;
   i18n.defaultLocale = lib.mkDefault cfg.locale;
 
+  # Keyboard layout, for the desktop AND for the two text consoles.
+  #
+  # These are `services.xserver.xkb.*` and there is no X server here. The
+  # option names are historical: nixpkgs' `services.graphical-desktop` module
+  # (enabled for us by greetd, through services.displayManager) renders them
+  # into /etc/X11/xorg.conf.d/00-keyboard.conf, systemd-localed reads that
+  # file, and niri asks localed because home/desktop.nix leaves its own xkb
+  # block empty. So this is the single source of truth, as a declarative
+  # option rather than a `localectl set-x11-keymap` run that no rebuild can
+  # reproduce.
+  #
+  # `console.useXkbConfig` then derives the VT keymap from the same values,
+  # which is what makes the initrd LUKS passphrase prompt agree with the
+  # keyboard the passphrase was chosen on.
+  services.xserver.xkb = {
+    layout = lib.mkDefault cfg.keyboard.layout;
+    variant = lib.mkDefault cfg.keyboard.variant;
+    options = lib.mkDefault cfg.keyboard.options;
+  };
+  console.useXkbConfig = lib.mkDefault true;
+
   # Fonts: the nerd font the home layer names (ghostty, foot, waybar all ask
   # for "JetBrainsMono Nerd Font"), plus a Noto fallback for CJK/emoji so
   # nothing renders as tofu.

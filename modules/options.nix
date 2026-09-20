@@ -128,5 +128,46 @@
       default = "en_GB.UTF-8";
       description = "Default locale. mkDefault — override freely.";
     };
+
+    keyboard.layout = lib.mkOption {
+      type = lib.types.str;
+      default = "us";
+      example = "fr";
+      description = ''
+        XKB layout, as an xkeyboard-config name ("us", "fr", "de", "gb").
+        Several may be given comma-separated ("us,fr") to switch between them.
+
+        THIS IS ONE SETTING FOR THREE KEYBOARDS, which is the reason it exists
+        as an option rather than as something you run once by hand.
+
+        niri deliberately does not carry its own copy of the layout: with an
+        empty `xkb` block (see home/desktop.nix) it asks systemd-localed, and
+        localed reads /etc/X11/xorg.conf.d/00-keyboard.conf. NixOS generates
+        that file from `services.xserver.xkb.*` whenever
+        `services.graphical-desktop.enable` is on, which greetd turns on -- so
+        this flows to the compositor with no X server anywhere in sight.
+
+        The other two keyboards are the text ones, and they are the reason
+        `console.useXkbConfig` is switched on alongside: the VT (tuigreet, the
+        emergency shell) and, more importantly, THE INITRD PASSPHRASE PROMPT.
+        Set a LUKS passphrase containing characters that move between layouts
+        and leave the console on US, and the machine becomes unbootable by its
+        owner with no indication of why.
+      '';
+    };
+
+    keyboard.variant = lib.mkOption {
+      type = lib.types.str;
+      default = "";
+      example = "dvorak";
+      description = "XKB variant (\"dvorak\", \"colemak\", \"nodeadkeys\"). Empty means the layout's default.";
+    };
+
+    keyboard.options = lib.mkOption {
+      type = lib.types.str;
+      default = "";
+      example = "grp:alt_shift_toggle,caps:escape";
+      description = "XKB options, comma-separated. Empty means none.";
+    };
   };
 }
