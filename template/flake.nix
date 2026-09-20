@@ -8,10 +8,18 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     wasisabi = {
-      url = "github:YOUR_GITHUB_NAME/wasisabi";
+      url = "github:wighawag/wasisabi";
+      # Point wasisabi at YOUR pins rather than its own. The module layers are
+      # plain modules -- `pkgs` comes from the nixosSystem that imports them --
+      # so this is what makes them evaluate against the nixpkgs above.
+      inputs.nixpkgs.follows = "nixpkgs";
+      inputs.home-manager.follows = "home-manager";
+      inputs.nixos-hardware.follows = "nixos-hardware";
+    };
+    nixos-hardware = {
+      url = "github:NixOS/nixos-hardware";
       inputs.nixpkgs.follows = "nixpkgs";
     };
-    nixos-hardware.url = "github:NixOS/nixos-hardware";
   };
 
   outputs = { nixpkgs, home-manager, wasisabi, nixos-hardware, ... }: {

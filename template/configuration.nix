@@ -3,6 +3,12 @@
 # Your machine-specific config: identity, hardware file, and the wasisabi
 # layers on top. Everything wasisabi sets is a mkDefault, so anything you
 # write here wins.
+#
+# If the wasisabi installer wrote this file, it filled in the placeholders and
+# the two answer blocks below and then got out of the way. There is no
+# machine-managed state here and nothing reads it back: it is an ordinary
+# NixOS module that you own. Edit it, delete lines, override anything, or
+# remove wasisabi entirely and keep the machine.
 
 {
   imports = [
@@ -14,27 +20,50 @@
     # <nixos-hardware/lenovo/thinkpad/t14s/amd>
   ];
 
+  # Bootloader. UEFI with systemd-boot, which is what the installer requires
+  # (it refuses to install on a machine that booted in BIOS mode) and what
+  # hardware-configuration.nix deliberately does not decide for you. On a BIOS
+  # machine, delete these two lines and use:
+  #   boot.loader.grub.device = "/dev/sda";
+  boot.loader.systemd-boot.enable = true;
+  boot.loader.efi.canTouchEfiVariables = true;
+
   networking.hostName = "CHANGEME_HOSTNAME";
 
   users.users.CHANGEME_USERNAME = {
     isNormalUser = true;
     extraGroups = [ "wheel" "networkmanager" "video" ];
-    initialPassword = "change-me";
+    initialPassword = "CHANGEME_PASSWORD";
   };
+
+  # The NixOS release this machine was first installed from. It is not a
+  # version to bump: it pins the on-disk state formats that later releases
+  # must stay compatible with. Leave it alone.
+  system.stateVersion = "CHANGEME_STATE_VERSION";
 
   # ── wasisabi system layer ──
   wasisabi.enable = true;
-  # wasisabi.zram.enable = true;
-  # wasisabi.cellular.enable = true;   # WWAN/LTE modems
+
+  # Ordinary Nix, and yours. Every value wasisabi sets is a mkDefault, so each
+  # line below simply wins; delete one and that option falls back to the
+  # project default. All of them are documented in modules/options.nix, and
+  # readable on the running machine with `nixos-option wasisabi`.
+  # >>> wasisabi:system
+  # wasisabi.greetd.greeter = "tuigreet";
+  # wasisabi.tor.enable = false;
+  # wasisabi.keyboard.layout = "fr";
+  # <<< wasisabi:system
 
   # ── wasisabi home layer, for your user ──
   home-manager.users.CHANGEME_USERNAME = {
     imports = [ wasisabi.homeModules.wasisabi ];
     wasisabi.enable = true;
+
     # Overriding the opinionated defaults is the whole point:
+    # >>> wasisabi:home
     # wasisabi.browser = "librewolf";
     # wasisabi.editor = "helix";
     # wasisabi.apps.office = true;
-    # wasisabi.apps.syncthing = true;
+    # <<< wasisabi:home
   };
 }
