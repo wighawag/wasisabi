@@ -22,7 +22,7 @@ or to leave it.
 | Role | Choice | License |
 |---|---|---|
 | Compositor | niri | GPL-3.0 |
-| Login | greetd + tuigreet | GPL/MIT |
+| Login | greetd + Noctalia greeter (or tuigreet) | GPL/MIT |
 | Bar | Waybar | MIT |
 | Launcher | fuzzel | MIT |
 | Notifications | mako | MIT |
@@ -62,7 +62,8 @@ wins**. Options are the API — extend, override, or ignore any part.
 Try it in a VM (no hardware needed):
 
 ```sh
-nix flake check              # validate (also runs `niri validate` on the config)
+nix flake check              # validate: evaluates every layer, runs `niri validate`,
+                             # and checks the installer against the options
 ./scripts/run-vm-gl.sh       # build if needed, then boot it
 ```
 
@@ -109,14 +110,42 @@ Log in as `demo` / `demo`. Use `Alt+*` keybinds (host desktops eat `Super`).
 > get a desktop, your host is not showing QEMU's 2D console scanout. Try
 > `QEMU_OPTS="-display gtk,gl=on"` or `QEMU_OPTS="-display sdl,gl=off"`.
 
-Adopt it on a machine:
+## Installing it
+
+### With the ISO
 
 ```sh
-nix flake new -t github:YOUR_NAME/wasisabi ~/systems/my-laptop
-# edit configuration.nix (username, hostname), drop in
+nix build github:wighawag/wasisabi#iso-netinstall   # small, needs a network
+nix build github:wighawag/wasisabi#iso-offline      # carries the packages too
+# write result/iso/*.iso to a USB stick, boot it, then:
+sudo wasisabi-install
+```
+
+It asks for the machine's identity (hostname, user, password, timezone, locale, **keyboard layout**), then for the disk, and then offers wasisabi's own options: greeter, shell, terminal, browser, file manager, apps, services. Skip that last part and you get the defaults, which are not written into your config and therefore keep following the project.
+
+What it leaves behind is **an ordinary flake you own** at `/etc/nixos`: `flake.nix`, `configuration.nix`, the `hardware-configuration.nix` it generated, and a `flake.lock` pinned to exactly the revision the ISO installed. It is a git repo with one commit. Nothing reads it back, nothing manages it, and removing the two module imports leaves you with a working NixOS machine that has never heard of wasi-sabi.
+
+There is **no live desktop on the ISO**, deliberately: niri refuses a software EGL renderer, so a graphical installer would show a black screen on exactly the machines people test on first. The installed system is the graphical thing.
+
+The installer also runs unattended, with the same questions in a file:
+
+```sh
+wasisabi-install --answers answers.json          # install
+wasisabi-install --answers answers.json --out-only ./out   # just write the flake, touch no disk
+```
+
+See [`notes/installer.md`](notes/installer.md) for how it works, what is verified and what is not.
+
+### By hand, without the ISO
+
+```sh
+nix flake new -t github:wighawag/wasisabi ~/systems/my-laptop
+# edit configuration.nix (username, hostname, stateVersion), drop in
 # hardware-configuration.nix, pick a nixos-hardware module, then:
 sudo nixos-rebuild switch --flake ~/systems/my-laptop
 ```
+
+The installer fills in this same template, so the two paths cannot diverge.
 
 ## Adopting on an *existing* NixOS config
 
@@ -211,6 +240,14 @@ a black screen. See [`notes/compositor-alternatives.md`](notes/compositor-altern
 for why niri and not Sway, SwayFX or Hyprland, and what it would cost to add
 one of them back.
 
+## The keyboard layout
+
+`wasisabi.keyboard.layout` (plus `.variant` and `.options`) is one setting for three keyboards, which is why it is an option rather than something you run once by hand.
+
+niri deliberately keeps no copy of the layout: with an empty `xkb` block it asks systemd-localed, and localed reads `/etc/X11/xorg.conf.d/00-keyboard.conf`, which NixOS generates from `services.xserver.xkb.*` whenever a display manager is enabled. So this reaches the compositor with no X server anywhere in sight.
+
+The other two keyboards are the text ones. The option also switches on `console.useXkbConfig`, which carries the layout to the VT **and into the initrd** -- so a LUKS passphrase chosen on a French keyboard is still typeable at the next boot. Getting that wrong produces a machine its owner cannot unlock, with nothing on screen to explain why, and it is the one thing the VM install test checks by physically typing the passphrase in the other layout.
+
 ## Keybinds (defaults, `modKey = SUPER`)
 
 > The demo VM uses `modKey = ALT` instead: your host desktop eats `Super+...`
@@ -279,6 +316,9 @@ under llvmpipe every animation frame is a full-screen CPU blit. The demo VM
 already does this.
 ## Notes
 
+- [`notes/installer.md`](notes/installer.md) — how the ISO and installer work,
+  the decisions behind them, what is verified against a real VM install and
+  what is not.
 - [`notes/open-items.md`](notes/open-items.md) — what has actually been verified
   against a booted VM, what has not, and the next steps in order.
 - [`notes/composition-verification.md`](notes/composition-verification.md) —

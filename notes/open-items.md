@@ -1,11 +1,25 @@
 # Open items
 
-State as of 2026-09-10, after replacing Hyprland with niri. Written so the next
-session can pick up without re-deriving anything.
+State as of 2026-09-10, after replacing Hyprland with niri, updated 2026-09-20
+after building the installer. Written so the next session can pick up without
+re-deriving anything.
+
+> The installer, the two ISO variants and the VM install test have their own
+> note: [`notes/installer.md`](installer.md). It supersedes this file for
+> anything about installing, partitioning, the keyboard layout or the
+> generated flake.
 
 ## Verified, and how
 
 All of this was checked against a booted demo VM, not just evaluated:
+
+- **A whole install, twice** (plain and LUKS), from ISO to a login screen on
+  the installed disk. See `notes/installer.md`; run it with
+  `./scripts/test-install-vm.sh`.
+- **`niri validate` now actually runs in `nix flake check`.** It did not
+  before, and the README claimed it did: `flake check` only evaluates
+  `nixosConfigurations` to a `.drv`, so the config derivation was never built
+  and the validation was never performed. It is a `checks` output now.
 
 - **niri session end to end.** greetd hands off to `niri-session`, niri gets a real render node, output detected at 1280x800, Waybar / swayidle / polkit-gnome all `active`, `systemctl --failed` reports 0 units, home-manager activation succeeds on two consecutive runs.
 - **Config validity at build time.** The home-manager niri module runs `niri validate` inside the derivation (`checkConfig = true`), so a bad option fails `nixos-rebuild` rather than producing a black screen.
@@ -15,6 +29,11 @@ All of this was checked against a booted demo VM, not just evaluated:
 
 ## Not verified
 
+- **The graphical session inside the install test.** The install test verifies
+  boot-to-login with the text greeter, because the machine it was built on has
+  no `/run/opengl-driver` and QEMU therefore cannot hand the guest GL. Running
+  it on a workstation with working graphics exercises the session too; the
+  harness says which of the two it did.
 - **swaylock actually unlocking.** `security.pam.services.swaylock` is set and swaylock starts, but the PAM path was never exercised by hand: everything in testing was driven over niri IPC. **Test this first, with an SSH escape hatch open (`ssh -p 2222 demo@localhost`, then `pkill swaylock`), because getting it wrong locks you out of the session.**
 - **The keybinds.** Every bind was generated and validated by `niri validate`, but no key was ever physically pressed. `Alt+Shift+/` in the VM shows the live list.
 - **Anything hardware-shaped.** Touchpad gestures, multi-monitor hotplug, VRR, brightness keys, suspend/resume. QEMU has none of it.
