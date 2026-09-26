@@ -148,6 +148,7 @@
       title = "Desktop";
       items = [
         { option = "home:shell"; }
+        { option = "system:bash.enable"; }
         { option = "home:modKey"; }
         { option = "home:animations"; }
       ];

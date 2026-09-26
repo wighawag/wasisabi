@@ -36,7 +36,7 @@ The anon stack (`anon-accounts`, `anonctl-units`, `anon-dns`, `anon-home`, `anon
 What was changed in the carried-over code, and why:
 
 - **No fleet coupling.** `self.packages.*` defaults became `config.wasisabi.pkgs.*`, an attrset of mkDefault packages built against the importing system's pkgs, so a consumer can substitute one (`wasisabi.pkgs.wherever = ...`).
-- **anon-search lost its two private engines.** The fleet's challenge-answering engines and the searchcast browser depend on packages that are private to that repo by design (site-specific scrapers). The plain keyless engines remain.
+- **anon-search keeps only SearXNG's stock engines.** The fleet adds engines of its own that are deliberately kept private to that repository; they are not part of wasisabi and are not described here.
 - **anon-home's `endpoint` became optional.** With none, the provider comes from the extension (`provider`, default `local`) and models.json carries no provider. A loopback endpoint is also accepted now, for a machine that uses the exemption route instead.
 - **The dispatcher is loopback-only.** The fleet's lives in its reverse-proxy module and serves a wildcard certificate on a real domain for a phone on a mesh. Here `modules/services/anon-dispatcher.nix` serves `http://<handle>.localhost:8480`: `*.localhost` resolves to loopback by RFC 6761 in browsers and in glibc, so there is no DNS, domain or certificate, and the bind keeps it local. The routing half is unchanged: the store config holds a wildcard site and a glob import, and reconcile writes one fragment per account outside the store. `anon-reconcile.sh` gained `--link-scheme` and `--link-port` so `links` prints a URL that works.
 - **A fix to reconcile** (see "Found" below).
@@ -106,6 +106,6 @@ Between the two that do, Gemma wins on the cost an agent actually pays, which is
 
 ## Next
 
-- Converge the my-boxes fleet onto these building blocks, so telemaque and nono run one copy (see the note in that repo). The rename is mechanical; what needs care is the fleet-only halves (the challenge engines, the mesh dispatcher).
+- Converge the my-boxes fleet onto these building blocks, so telemaque and nono run one copy (see the note in that repo). The rename is mechanical; what needs care is the fleet-only halves (its private search engines, the mesh dispatcher).
 - A larger default model where the machine has the memory (a mixture-of-experts model with few active parameters runs at small-model speed on a CPU).
 - Offer reaching an anon interface from another device as an explicit, separate choice rather than by widening the loopback bind.

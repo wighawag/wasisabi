@@ -170,6 +170,24 @@
       description = "XKB options, comma-separated. Empty means none.";
     };
 
+    bash.enable = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
+      description = ''
+        A modern interactive bash for every account, in /etc/bashrc: ble.sh
+        (syntax highlighting and autosuggestions as you type), fzf (Ctrl-T
+        files, Alt-C directories), zoxide (`z` jumps to directories you use),
+        atuin (Ctrl-R searches your whole history, kept locally) and a
+        starship powerline prompt, all in one Catppuccin Mocha palette with
+        `ls` colours to match.
+
+        Only at a real terminal: a script, an agent's tool shell or anything
+        reporting TERM=dumb gets plain bash, so agents' commands never land in
+        your history. The prompt's shapes and icons need a Nerd Font in the
+        terminal, which wasisabi installs and its terminals use.
+      '';
+    };
+
     # ── The agent layer: a local model, private search, and agents that use
     # them, for the owner and for anonymous accounts. See modules/agents.nix.
 

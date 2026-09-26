@@ -471,13 +471,52 @@
               ok = !(lib.elem "multi-user.target" (d.systemd.services.wasisabi-anon-enroll.wantedBy or [ ]));
             }
           ];
-          agentFailures = map (c: c.name) (lib.filter (c: !c.ok) agentClaims);
+          # The interactive bash stack's ORDER, read from the generated
+          # /etc/bashrc because it is decided by how NixOS merges the pieces,
+          # which is the thing that can silently change: atuin must come after
+          # fzf or fzf owns Ctrl-R, and ble.sh is sourced first, attached last.
+          # (Carried over from my-boxes' interactive-shell-order check.)
+          bashrc = d.environment.etc.bashrc.text;
+          bashMarkers = [
+            "share/blesh/ble.sh --noattach"
+            "/bin/fzf --bash"
+            "/bin/zoxide init bash"
+            "/bin/atuin init bash --disable-up-arrow --disable-ai"
+            "/bin/starship init bash"
+            "&& ble-attach"
+          ];
+          offsetIn =
+            m:
+            let
+              parts = lib.splitString m bashrc;
+            in
+            if lib.length parts < 2 then -1 else lib.stringLength (lib.head parts);
+          bashOffsets = map offsetIn bashMarkers;
+          ascending = l: lib.length l < 2 || (lib.elemAt l 0 < lib.elemAt l 1 && ascending (lib.tail l));
+          shellClaims = [
+            {
+              name = "every step of the interactive bash init is in /etc/bashrc, in order (ble.sh, fzf, zoxide, atuin, starship, ble-attach)";
+              ok = lib.all (o: o >= 0) bashOffsets && ascending bashOffsets;
+            }
+            {
+              name = "fzf does not bind Ctrl-R, and nothing else layers on top of atuin";
+              ok =
+                lib.hasInfix "FZF_CTRL_R_COMMAND=\n" bashrc
+                && !lib.hasInfix "fzf/key-bindings.bash" bashrc
+                && !lib.hasInfix "bash-preexec" bashrc;
+            }
+            {
+              name = "the bash stack is gated on an interactive shell at a real terminal (never an agent's TERM=dumb shell)";
+              ok = lib.hasInfix "if [[ $- == *i* && \${TERM-dumb} != dumb ]]; then" bashrc;
+            }
+          ];
+          agentFailures = map (c: c.name) (lib.filter (c: !c.ok) (agentClaims ++ shellClaims));
         in
         {
           agent-layer = lib.throwIf (agentFailures != [ ]) ''
             wasisabi: the agent layer no longer holds these claims on the demo host:
               ${lib.concatStringsSep "\n  " agentFailures}
-          '' pkgs.writeText "wasisabi-agent-layer" (lib.concatMapStringsSep "\n" (c: c.name) agentClaims);
+          '' pkgs.writeText "wasisabi-agent-layer" (lib.concatMapStringsSep "\n" (c: c.name) (agentClaims ++ shellClaims));
 
           # `niri validate` runs inside this derivation, which is the reason
           # the compositor was chosen. Until it was a check, nothing in

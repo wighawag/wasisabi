@@ -32,6 +32,7 @@
     ./wherever-anon.nix
     ./wherever-anon-reconcile.nix
     ./anon-dispatcher.nix
+    ./interactive-shell.nix
   ];
 
   options.wasisabi.pkgs = lib.mkOption {

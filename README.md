@@ -28,7 +28,7 @@ or to leave it.
 | Notifications | mako | MIT |
 | Lock / idle | swaylock + swayidle | MIT |
 | Terminal | Ghostty (or foot) | MIT |
-| Shell | zsh + starship + fzf | MIT/ISC |
+| Shell | bash + ble.sh, fzf, zoxide, atuin and a starship powerline prompt, one Catppuccin palette | BSD/MIT/ISC |
 | Editors | Neovim + Helix (both ship) | Apache-2.0/MPL |
 | Browser | Firefox (or LibreWolf/Chromium) | MPL |
 | Files | Thunar (or Nautilus) | GPL |

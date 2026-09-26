@@ -103,6 +103,9 @@ lib.mkIf cfg.enable {
   # Compressed-RAM swap: safe on any machine, no partition required.
   zramSwap.enable = lib.mkDefault cfg.zram.enable;
 
+  # The interactive bash stack (modules/services/interactive-shell.nix).
+  wasisabi.services.interactiveShell.enable = lib.mkDefault cfg.bash.enable;
+
   # Small opinionated CLI base for any TTY session.
   environment.systemPackages = with pkgs; [
     git
