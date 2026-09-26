@@ -169,5 +169,157 @@
       example = "grp:alt_shift_toggle,caps:escape";
       description = "XKB options, comma-separated. Empty means none.";
     };
+
+    # ── The agent layer: a local model, private search, and agents that use
+    # them, for the owner and for anonymous accounts. See modules/agents.nix.
+
+    user = lib.mkOption {
+      type = lib.types.str;
+      default = "";
+      example = "alice";
+      description = ''
+        The machine's OWNER: the account the agent layer configures pi and
+        wherever for, and adds to the local model's and search's groups.
+
+        The system layer cannot know this by itself (a NixOS module is not
+        told which of the declared users is the person at the keyboard), which
+        is the only reason it is an option. Empty leaves those per-user parts
+        off; the machine-wide services (model, search, anon accounts) do not
+        depend on it.
+      '';
+    };
+
+    llm.enable = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
+      description = ''
+        A local AI model on this machine: llama.cpp on the CPU, serving a small
+        open-weights model (Qwen3.5 4B, Apache-2.0, ~2.7 GB download) over a
+        unix socket. Prompts never leave the machine; the server itself runs
+        with no network access at all.
+
+        Every agent here is configured to use it, so the machine has a working
+        assistant with no account anywhere. It is also the ONLY model the
+        anonymous accounts can use without a hole in their jail.
+
+        Costs the download and, while answering, CPU. Idle, it costs memory the
+        kernel can reclaim. See wasisabi.services.llm.* to change the model.
+      '';
+    };
+
+    search.enable = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
+      description = ''
+        Private web search: a local SearXNG (a metasearch engine querying many
+        engines at once, no account, no tracking profile) plus webveil, the
+        search-and-fetch tool agents use. Also usable from a shell: `webveil`.
+      '';
+    };
+
+    search.viaTor = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+      description = ''
+        Send the search engines' requests through Tor, so they see a Tor exit
+        rather than this machine's address.
+
+        OFF by default because it costs results: many engines challenge or
+        refuse Tor exits. Your queries are still sent without cookies or an
+        account either way; this decides only which address they come from.
+      '';
+    };
+
+    agents.enable = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
+      description = ''
+        The pi coding agent for the machine's owner, set up to use the local
+        model and private search, with memonaut (search your past agent
+        conversations) and wherever (a web UI for agent sessions, on this
+        machine only: run `wherever-link` for its address).
+      '';
+    };
+
+    anon.enable = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
+      description = ''
+        Anonymous accounts: separate logins (anon, anon-john, anon-jane) whose
+        EVERY connection is forced through Tor by the kernel, fail-closed
+        (anonctl). If Tor is down, they have no network, never your address.
+
+        Each comes with its own agent setup (pi on the local model, web search
+        through its own Tor circuit) and its own wherever web UI, reachable from
+        this machine: run `sudo anon-reconcile links`.
+
+        They carry nothing of yours: no keys, no git identity, no history. Use
+        one by logging in as it, or `sudo anonctl use anon`.
+
+        Runs the Tor client even if wasisabi.tor.enable is off, since it is
+        their only way out (so a Tor SOCKS port on 127.0.0.1:9050 exists for
+        every local account too, as with that option). Changes how this machine
+        resolves hostnames (systemd-resolved, nscd not answering host lookups),
+        because otherwise every name an anon account looks up would be
+        resolved in the clear by the system resolver.
+      '';
+    };
+
+    anon.autoEnroll = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
+      description = ''
+        Put the declared anon accounts under anonctl's forcing automatically,
+        at boot, instead of waiting for `sudo anonctl add <account>`.
+
+        Until an account is enrolled it exists but is NOT forced; it is inert
+        only because it has no password and no key. Enrolling makes the jail
+        real, and a retry timer proves it (`anonctl verify`) once Tor is up, at
+        which point each account's web UI appears. It never punches an
+        exemption: the local model is reached over a unix socket, which needs
+        none.
+      '';
+    };
+
+    anon.accounts = lib.mkOption {
+      type = lib.types.attrsOf (
+        lib.types.submodule {
+          options = {
+            uid = lib.mkOption {
+              type = lib.types.ints.between 1000 29999;
+              description = "Pinned uid of the login account (the forcing matches it, so it must never drift).";
+            };
+            shimUid = lib.mkOption {
+              type = lib.types.ints.between 400 999;
+              description = "Pinned uid of the account's shim (its private relay to Tor).";
+            };
+          };
+        }
+      );
+      default = {
+        anon = {
+          uid = 8801;
+          shimUid = 412;
+        };
+        anon-john = {
+          uid = 8802;
+          shimUid = 413;
+        };
+        anon-jane = {
+          uid = 8803;
+          shimUid = 414;
+        };
+      };
+      description = ''
+        The anonymous account slots, by anonctl account name ("anon" or
+        "anon-<slot>"), with pinned uids. The names are world-readable and must
+        never say what an account is FOR: "john" and "jane" are placeholder
+        personas. Declare the whole pool at once; a pool that grows later
+        records when an identity was created.
+
+        uids are high (away from the 1000+ normal-user front) and shim uids low
+        (away from the 999- system front), so neither is ever auto-allocated.
+      '';
+    };
   };
 }

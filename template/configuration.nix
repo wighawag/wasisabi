@@ -44,6 +44,10 @@
   # ── wasisabi system layer ──
   wasisabi.enable = true;
 
+  # Who the machine belongs to: the account the agent layer (pi, wherever,
+  # the local model and search) is set up for.
+  wasisabi.user = "CHANGEME_USERNAME";
+
   # Ordinary Nix, and yours. Every value wasisabi sets is a mkDefault, so each
   # line below simply wins; delete one and that option falls back to the
   # project default. All of them are documented in modules/options.nix, and

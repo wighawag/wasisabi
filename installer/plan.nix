@@ -133,6 +133,18 @@
     }
 
     {
+      title = "AI and privacy";
+      items = [
+        { option = "system:llm.enable"; }
+        { option = "system:agents.enable"; }
+        { option = "system:search.enable"; }
+        { option = "system:search.viaTor"; }
+        { option = "system:anon.enable"; }
+        { option = "system:anon.autoEnroll"; }
+      ];
+    }
+
+    {
       title = "Desktop";
       items = [
         { option = "home:shell"; }
@@ -166,5 +178,7 @@
   skip = {
     "system:enable" = "The installer is installing wasisabi; asking whether to enable it is not a question.";
     "home:enable" = "Same: the home layer is the point of installing, and the generated configuration.nix shows the line so it can be removed by hand later.";
+    "system:user" = "Not a question: it is the account created under Machine identity, substituted into the template (CHANGEME_USERNAME), so it can never name a different user than the one being created.";
+    "system:anon.accounts" = "A pool of account names with pinned uids is structure, not an answer; the defaults (anon, anon-john, anon-jane) are what every machine should start with, and changing the pool is a deliberate edit to configuration.nix.";
   };
 }

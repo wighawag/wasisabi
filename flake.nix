@@ -18,6 +18,18 @@
       flake = false;
     };
 
+    # The wherever server (a web UI driving pi agent sessions), as SOURCE: its
+    # `package.nix` is a plain function of pkgs, so it builds against the
+    # consumer's nixpkgs instead of dragging its own pin into every closure.
+    # Pinned to the commit tagged wherever-dev@0.17.0, the release the my-boxes
+    # fleet runs (0.16.0+ is required: unix socket support, which is the only
+    # interface an anon account can serve). Its server/package.json also
+    # decides which Pi version the `pi` CLI is built at; see pkgs/default.nix.
+    wherever = {
+      url = "github:wighawag/wherever/c46fe265bd5a7d266894f71b9bd63583593c0280";
+      flake = false;
+    };
+
     # Used by the INSTALLER only (partitioning, and the hardware module the
     # generated flake offers users). Flake inputs are fetched on access, so
     # consumers who only import the module layers never pull these.
@@ -41,6 +53,7 @@
       nixpkgs,
       home-manager,
       noctalia,
+      wherever,
       disko,
       nixos-hardware,
       ...
@@ -111,6 +124,7 @@
               nixpkgs
               home-manager
               noctalia
+              wherever
               disko
               nixos-hardware
             ];
@@ -158,7 +172,14 @@
     {
       # System-level layer: services, programs, sane hardware-agnostic defaults.
       # Knows nothing about your disks, drivers or CPU.
-      nixosModules.wasisabi = import ./modules;
+      #
+      # The source trees the agent layer builds from are injected the same way
+      # noctaliaSrc is for the home layer, so the pin lives in flake.lock and a
+      # consumer wires nothing.
+      nixosModules.wasisabi = {
+        imports = [ ./modules ];
+        _module.args.wasisabiSources = { inherit wherever; };
+      };
 
       # User-level layer: apps, dotfiles, keybinds, theming.
       # Also usable standalone with home-manager on any distro.
@@ -223,7 +244,16 @@
         autotest = autotestAnswers "plain";
       };
 
-      packages.${system} = {
+      packages.${system} =
+        # The agent layer's packages, built here against this repo's pin so they
+        # can be built and cached on their own (`nix build .#anonctl`). The
+        # modules do NOT use these: they build the same files against the
+        # importing system's pkgs.
+        (import ./pkgs {
+          inherit pkgs;
+          sources = { inherit wherever; };
+        })
+        // {
         default = self.packages.${system}.installer;
         installer = mkInstaller { offline = false; };
         questions = questionsJson;
@@ -289,6 +319,36 @@
               actual = c.services.tor.enable;
             }
             {
+              name = "the owner is the created user (wasisabi.user)";
+              expected = "wighawag";
+              actual = c.wasisabi.user;
+            }
+            {
+              name = "an unanswered agent option keeps the project default (local model on)";
+              expected = true;
+              actual = c.systemd.services ? wasisabi-llm;
+            }
+            {
+              name = "the owner may reach the local model's socket";
+              expected = true;
+              actual = lib.elem "wasisabi-llm" c.users.users.wighawag.extraGroups;
+            }
+            {
+              name = "the owner's pi gets the local-model extension";
+              expected = true;
+              actual = c.environment.etc ? "wasisabi/pi-extensions/pi-wasisabi-local";
+            }
+            {
+              name = "search through Tor, answered, reaches SearXNG";
+              expected = [ "socks5h://127.0.0.1:9050" ];
+              actual = c.wasisabi.services.searxng.egressProxies;
+            }
+            {
+              name = "a false answer is honoured (anon accounts)";
+              expected = false;
+              actual = c.users.users ? anon-john;
+            }
+            {
               name = "the greeter answer is honoured";
               expected = true;
               actual = c.services.greetd.settings.default_session.command != null;
@@ -348,8 +408,77 @@
           report = lib.concatMapStringsSep "\n  " (
             e: "${e.name}: expected ${builtins.toJSON e.expected}, got ${builtins.toJSON e.actual}"
           ) failures;
+
+          # The agent layer as the DEMO host gets it: every default on, so
+          # this is the shape a fresh install has. Each claim is one of the
+          # load-bearing properties the modules' comments argue for, pinned
+          # so a refactor that quietly drops one fails `nix flake check`.
+          d = self.nixosConfigurations.demo.config;
+          anonHomeSettings = builtins.fromJSON (
+            builtins.unsafeDiscardStringContext d.environment.etc."anon-home/settings.json".text
+          );
+          agentClaims = [
+            {
+              name = "the model server has no network at all";
+              ok = d.systemd.services.wasisabi-llm.serviceConfig.PrivateNetwork;
+            }
+            {
+              name = "the model is served on a unix socket";
+              ok = lib.hasInfix "--host /run/wasisabi-llm/llm.sock" d.systemd.services.wasisabi-llm.serviceConfig.ExecStart;
+            }
+            {
+              name = "the declared anon slots exist with their pinned uids";
+              ok =
+                d.users.users.anon.uid == 8801
+                && d.users.users.anon-john.uid == 8802
+                && d.users.users.anon-jane.uid == 8803;
+            }
+            {
+              name = "every anon slot may reach the model socket (no jail exemption needed)";
+              ok = lib.all (a: lib.elem "wasisabi-llm" d.users.users.${a}.extraGroups) [
+                "anon"
+                "anon-john"
+                "anon-jane"
+              ];
+            }
+            {
+              name = "anon sessions start on the local model";
+              ok = anonHomeSettings.defaultProvider == "local" && anonHomeSettings.defaultModel == "qwen3.5-4b";
+            }
+            {
+              name = "anon sessions load the local-model extension from the store";
+              ok = lib.any (p: lib.hasInfix "pi-wasisabi-local" p) anonHomeSettings.packages;
+            }
+            {
+              name = "the anon dispatcher binds loopback only";
+              ok = d.services.caddy.virtualHosts."http://*.localhost:8480".listenAddresses == [ "127.0.0.1" ];
+            }
+            {
+              name = "the Tor client is on for the anon accounts";
+              ok = d.services.tor.enable && d.services.tor.client.enable;
+            }
+            {
+              name = "the agent layer opens no firewall port";
+              ok =
+                !(lib.any (p: lib.elem p d.networking.firewall.allowedTCPPorts) [
+                  8480
+                  11435
+                  31415
+                ]);
+            }
+            {
+              name = "enrolment never holds up the boot";
+              ok = !(lib.elem "multi-user.target" (d.systemd.services.wasisabi-anon-enroll.wantedBy or [ ]));
+            }
+          ];
+          agentFailures = map (c: c.name) (lib.filter (c: !c.ok) agentClaims);
         in
         {
+          agent-layer = lib.throwIf (agentFailures != [ ]) ''
+            wasisabi: the agent layer no longer holds these claims on the demo host:
+              ${lib.concatStringsSep "\n  " agentFailures}
+          '' pkgs.writeText "wasisabi-agent-layer" (lib.concatMapStringsSep "\n" (c: c.name) agentClaims);
+
           # `niri validate` runs inside this derivation, which is the reason
           # the compositor was chosen. Until it was a check, nothing in
           # `nix flake check` ever built it, so nothing ever ran it.

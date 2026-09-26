@@ -98,7 +98,25 @@
         "home-manager": "home-manager",
         "nixos-hardware": "nixos-hardware",
         "nixpkgs": "nixpkgs",
-        "noctalia": "noctalia"
+        "noctalia": "noctalia",
+        "wherever": "wherever"
+      }
+    },
+    "wherever": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1790249464,
+        "narHash": "sha256-OReuwW8NrJWuKJo6N5efiuUR2fRZlBK+K4ZWikVeiEU=",
+        "owner": "wighawag",
+        "repo": "wherever",
+        "rev": "c46fe265bd5a7d266894f71b9bd63583593c0280",
+        "type": "github"
+      },
+      "original": {
+        "owner": "wighawag",
+        "repo": "wherever",
+        "rev": "c46fe265bd5a7d266894f71b9bd63583593c0280",
+        "type": "github"
       }
     }
   },

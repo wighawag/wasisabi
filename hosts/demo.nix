@@ -52,6 +52,8 @@
 
   # Enable the system layer (the home layer is wired in flake.nix).
   wasisabi.enable = true;
+  # The agent layer (pi, wherever, local model, search) is set up for this user.
+  wasisabi.user = "demo";
 
   # Debug/testing access for the demo VM.
   virtualisation.vmVariant = {
