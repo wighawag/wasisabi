@@ -620,7 +620,32 @@ else
   install_args=(--root "$TARGET" --flake "path:$TARGET/etc/nixos#$hostname" --no-root-password --no-update-lock-file)
 fi
 
-if [ "${#install_args[@]}" -eq 0 ] || ! nixos-install "${install_args[@]}"; then
+# RETRY THE NETWORKED BUILD, because what fails it most is the network. A
+# wasisabi system builds packages that no public binary cache carries (the
+# agent layer's pi, wherever, webveil, memonaut, anonctl), and those builds
+# fetch hundreds of npm tarballs; one dropped HTTP/2 stream fails the whole
+# install AFTER the disk has been wiped. Measured in the VM install test
+# (2026-09-26): `Stream error in the HTTP/2 framing layer` on pi-webveil's
+# npm dependencies. Everything already built or downloaded stays in the
+# target's store, so a retry resumes rather than starts over, and a genuine
+# error (a stale lock, a bad option) simply fails three times the same way.
+install_ok=0
+if [ "${#install_args[@]}" -gt 0 ]; then
+  attempts=1
+  [ "$WASISABI_OFFLINE" = 1 ] || attempts=3
+  for attempt in $(seq 1 "$attempts"); do
+    if nixos-install "${install_args[@]}"; then
+      install_ok=1
+      break
+    fi
+    if [ "$attempt" -lt "$attempts" ]; then
+      warn "The build failed (attempt $attempt of $attempts). Downloads are the usual cause; retrying, keeping everything already fetched."
+      sleep 10
+    fi
+  done
+fi
+
+if [ "$install_ok" != 1 ]; then
   # The most likely way for this to fail is the pinned lock being rejected,
   # and "requires lock file changes" does not say WHICH changes. Ask nix, on a
   # scratch copy so nothing on the target is modified, and show the diff.
