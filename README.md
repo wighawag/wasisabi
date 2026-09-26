@@ -36,7 +36,7 @@ or to leave it.
 | Sync | Syncthing — P2P, self-hostable (optional) | MPL |
 | Media | mpv + imv | GPL/MIT |
 | Theme | Catppuccin Mocha | free |
-| Local AI model | llama.cpp + Qwen3.5 4B, on the CPU, on a unix socket | MIT / Apache-2.0 |
+| Local AI model | llama.cpp + Gemma 4 E4B, on the CPU, on a unix socket | MIT / Apache-2.0 |
 | Coding agent | pi, with wherever (a web UI for its sessions) | MIT / AGPL |
 | Search | SearXNG + webveil (no account, no profile) | AGPL |
 | Recall | memonaut (search your past agent sessions) | AGPL |

@@ -8,7 +8,7 @@ With the defaults (every option below is `true` unless stated), a fresh install 
 
 | Piece | What it is | Where |
 |---|---|---|
-| Local model | llama.cpp on the CPU, Qwen3.5 4B Q4_K_M (Apache-2.0, 2.7 GB), no network of its own | `/run/wasisabi-llm/llm.sock`, plus `127.0.0.1:11435` |
+| Local model | llama.cpp on the CPU, Gemma 4 E4B QAT (Apache-2.0, 4.2 GB), no network of its own | `/run/wasisabi-llm/llm.sock`, plus `127.0.0.1:11435` |
 | Search | SearXNG, socket-activated; `webveil` CLI | `/run/wasisabi-search/search.sock` |
 | The owner's agent | pi with three store extensions: the local model, web search/fetch, recall over past sessions; memonaut CLI | `~/.pi/agent/settings.json` (seeded) |
 | The owner's web UI | wherever, loopback only, token minted on the machine | `wherever-link` prints the URL |
@@ -83,19 +83,25 @@ On a booted demo VM (the demo config, headless with a real render node, 8 GB), n
 
 ## Why this default model
 
-Measured 2026-09-26 with the module's own server flags (8 threads to approximate a laptop, `--jinja`, reasoning off) and pi through the extension, on four agentic tasks (run a command, create and read back a file, count a file's lines, edit a file with the edit tool):
+Measured 2026-09-26 with the module's own server flags (8 threads to approximate a laptop, `--jinja`, reasoning off, 32k context) and pi through the extension, on five agentic tasks (run a command, create and read back a file, count a file's lines, edit a file with the edit tool, find which of three files contains a word), each model run once:
 
-- **Qwen3.5 4B Q4_K_M**: 4/4, 7 to 17 s per task.
-- **Phi-4-mini-instruct Q4_K_M** (MIT, similar size): 1/4, and that pass was not real. It never issued a tool call through pi: it wrote the command as markdown and invented the output, so no file was ever created.
+| Model | Passed | Per task | Download | Resident | Prompt / generation speed | Prompt tokens processed |
+|---|---|---|---|---|---|---|
+| **Gemma 4 E4B QAT UD-Q4_K_XL** (the default) | 5/5 | 3 to 4 s (11 s cold) | 4.2 GB | 5.2 GB | 237 / 18.0 tok/s | 1690 |
+| Gemma 4 E4B Q4_K_M | 5/5 | 2 to 15 s | 5.0 GB | | | 1849 |
+| Qwen3.5 4B Q4_K_M (the first default) | 5/5 | 8 to 17 s | 2.7 GB | 4.5 GB | 122 / 16.7 tok/s | 3926 |
+| Phi-4-mini-instruct Q4_K_M | 1/4 | | 2.5 GB | | | |
 
-At this size the difference that matters is whether the model drives tools at all, and only Qwen did. Both fit comfortably on a 16 GB machine (~2.7 GB of weights plus the context).
+Phi-4-mini's one pass was not real: it never issued a tool call through pi, it wrote the command as markdown and invented the output, so no file was ever created. At this size the first question is whether a model drives tools at all.
+
+Between the two that do, Gemma wins on the cost an agent actually pays, which is reading prompts: twice the prompt throughput, and less than half the prompt tokens processed over the same tasks. The second number is architectural: Qwen3.5 is a hybrid with recurrent layers, whose state llama.cpp cannot roll back to a shared prefix, so it reuses its prompt cache across requests less often and keeps re-reading pi's system prompt. Gemma 4 E4B costs 1.5 GB more download and ~0.75 GB more memory, which a 16 GB machine absorbs. Gemma 4 is Apache-2.0 (earlier Gemma releases were under Google's own terms and would have failed the libre rule), and it takes images with its mmproj (`wasisabi.services.llm.mmproj`). Five tasks run once is a small sample.
 
 ## Not verified
 
-- **Real hardware**, including how fast the default model answers on a laptop CPU. On this build machine (Zen 5, 8 threads) a tool-calling turn took about 28 s; in the VM (6 vCPUs) the anon account's turn took about 1m40s. Most of that is processing pi's system prompt, which llama.cpp caches across turns of one session.
+- **Real hardware**, including how fast the default model answers on a laptop CPU. With the first default (Qwen3.5 4B) a cold tool-calling turn took about 28 s on this build machine (Zen 5, 8 threads) and about 1m40s in the VM (6 vCPUs); the VM runs above were all on that model. Gemma 4 E4B measured roughly twice as fast on this machine (see "Why this default model"), but no laptop and no VM run has used it yet. Most of a cold turn is processing pi's system prompt.
 - **An anon account's wherever interface in a browser.** The route answers 200 with the UI's HTML through Caddy and the socket; no browser session was driven through it, and no agent session was run inside it.
 - **The installer's interactive TUI** with the new group (only the unattended route was run).
-- **The ISO sizes.** The offline image now also carries the model (2.7 GB).
+- **The ISO sizes.** The offline image now also carries the model (4.2 GB).
 
 ## Next
 

@@ -443,7 +443,7 @@
             }
             {
               name = "anon sessions start on the local model";
-              ok = anonHomeSettings.defaultProvider == "local" && anonHomeSettings.defaultModel == "qwen3.5-4b";
+              ok = anonHomeSettings.defaultProvider == "local" && anonHomeSettings.defaultModel == "gemma-4-e4b";
             }
             {
               name = "anon sessions load the local-model extension from the store";

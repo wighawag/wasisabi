@@ -35,7 +35,7 @@
 #
 # CPU BY DEFAULT, deliberately: this is a distro default, and the one
 # accelerator every machine has is its CPU. The default model is small enough
-# (a 4B model, ~2.7 GB at Q4_K_M) to answer at a usable speed on a laptop, and
+# (Gemma 4 E4B, ~4.2 GB at 4 bits) to answer at a usable speed on a laptop, and
 # `model` swaps in anything llama.cpp loads. A machine with a GPU sets
 # `package = pkgs.llama-cpp.override { vulkanSupport = true; }` or similar.
 let
@@ -108,23 +108,30 @@ in
     model = lib.mkOption {
       type = lib.types.path;
       default = pkgs.fetchurl {
-        name = "Qwen3.5-4B-Q4_K_M.gguf";
+        name = "gemma-4-E4B-it-qat-UD-Q4_K_XL.gguf";
         # Pinned by commit, not by branch: a model is a large binary whose
         # behaviour an agent depends on, so it moves when this line moves.
-        url = "https://huggingface.co/unsloth/Qwen3.5-4B-GGUF/resolve/e87f176479d0855a907a41277aca2f8ee7a09523/Qwen3.5-4B-Q4_K_M.gguf";
+        url = "https://huggingface.co/unsloth/gemma-4-E4B-it-qat-GGUF/resolve/8c5a9e4fd5482e2be20fe0bf013b4c262a8f4265/gemma-4-E4B-it-qat-UD-Q4_K_XL.gguf";
         # The LFS object id Hugging Face publishes, which is the file's sha256.
-        sha256 = "00fe7986ff5f6b463e62455821146049db6f9313603938a70800d1fb69ef11a4";
+        sha256 = "df0fd4ee07072c607c29a0a1cb4f98918426cca12f45a2776bdd6ee6d09a4de3";
       };
-      defaultText = lib.literalExpression "Qwen3.5-4B Q4_K_M (unsloth GGUF, Apache-2.0), fetched and pinned by hash";
+      defaultText = lib.literalExpression "Gemma 4 E4B instruct, QAT UD-Q4_K_XL (unsloth GGUF, Apache-2.0), fetched and pinned by hash";
       description = ''
         The GGUF weights, as a store path (so the model is pinned, verified and
         rolled back like any other package), or any path llama.cpp can read.
 
-        The default is Qwen3.5 4B at Q4_K_M: Apache-2.0, so it satisfies the
-        libre rule; tool-calling capable; ~2.7 GB, which a laptop CPU answers
-        at an interactive speed. A machine with more memory is better served by
-        a mixture-of-experts model with few ACTIVE parameters (Qwen3.6-35B-A3B
-        runs at small-model speed on a CPU, if you have ~24 GB to hold it).
+        The default is Gemma 4 E4B instruct, quantization-aware trained for 4
+        bits (QAT, UD-Q4_K_XL): Apache-2.0, so it satisfies the libre rule;
+        ~4.2 GB download, ~5.2 GB resident with the default context. Chosen by
+        measurement over Qwen3.5 4B and Phi-4-mini on pi agent tasks (see
+        notes/agents.md): it drove the tools correctly every time and answered
+        about twice as fast, because it processes prompts twice as fast and
+        llama.cpp reuses its prompt cache across requests, which it cannot do
+        as well for Qwen3.5's hybrid architecture.
+
+        A machine with more memory is better served by a mixture-of-experts
+        model with few ACTIVE parameters (Gemma 4 26B-A4B, Qwen3.6-35B-A3B):
+        they run near small-model speed on a CPU if you can hold them.
       '';
     };
 
@@ -134,19 +141,20 @@ in
       description = ''
         The multimodal projector matching `model`, which makes the server accept
         images. Null (the default) serves text only and saves the download; set
-        it and the model is advertised to clients as accepting images.
+        it and the model is advertised to clients as accepting images. For the
+        default model: mmproj-F16.gguf from the same unsloth repository.
       '';
     };
 
     modelId = lib.mkOption {
       type = lib.types.str;
-      default = "qwen3.5-4b";
+      default = "gemma-4-e4b";
       description = "The id the server advertises at /v1/models (llama-server's --alias), and what clients select.";
     };
 
     modelName = lib.mkOption {
       type = lib.types.str;
-      default = "Qwen3.5 4B (local, CPU)";
+      default = "Gemma 4 E4B (local, CPU)";
       description = "Display name clients show for the model.";
     };
 

@@ -194,7 +194,7 @@
       default = true;
       description = ''
         A local AI model on this machine: llama.cpp on the CPU, serving a small
-        open-weights model (Qwen3.5 4B, Apache-2.0, ~2.7 GB download) over a
+        open-weights model (Gemma 4 E4B, Apache-2.0, ~4.2 GB download) over a
         unix socket. Prompts never leave the machine; the server itself runs
         with no network access at all.
 
