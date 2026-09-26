@@ -36,6 +36,19 @@ or to leave it.
 | Sync | Syncthing — P2P, self-hostable (optional) | MPL |
 | Media | mpv + imv | GPL/MIT |
 | Theme | Catppuccin Mocha | free |
+| Local AI model | llama.cpp + Qwen3.5 4B, on the CPU, on a unix socket | MIT / Apache-2.0 |
+| Coding agent | pi, with wherever (a web UI for its sessions) | MIT / AGPL |
+| Search | SearXNG + webveil (no account, no profile) | AGPL |
+| Recall | memonaut (search your past agent sessions) | AGPL |
+| Anonymous accounts | anonctl: every packet forced through Tor, fail-closed | AGPL |
+
+## AI and privacy, on the machine
+
+A wasisabi machine comes with an assistant that needs no account anywhere: a small open-weights model running on the CPU, private web search, and the pi coding agent wired to both, plus a web UI for its sessions on this machine only (`wherever-link` prints the address).
+
+It also comes with three **anonymous accounts** (`anon`, `anon-john`, `anon-jane`) whose every connection the kernel forces through Tor, fail-closed: if Tor is down they have no network, never your address. Each is proven with `anonctl verify` before it is used, carries nothing of yours, and has its own agent (on the same local model, reached over a unix socket so their jail needs no exemption) and its own web UI (`sudo anon-reconcile links`).
+
+All of it is on by default and each part is one option (`wasisabi.llm.enable`, `.search.enable`, `.agents.enable`, `.anon.enable`); the installer asks. How it fits together, what was verified and what was not: [`notes/agents.md`](notes/agents.md).
 
 ## Architecture
 
@@ -316,6 +329,8 @@ under llvmpipe every animation frame is a full-screen CPU blit. The demo VM
 already does this.
 ## Notes
 
+- [`notes/agents.md`](notes/agents.md): the agent layer (local model, search,
+  pi and wherever, anonymous accounts), its design and what is verified.
 - [`notes/installer.md`](notes/installer.md) — how the ISO and installer work,
   the decisions behind them, what is verified against a real VM install and
   what is not.
