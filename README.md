@@ -129,7 +129,7 @@ Log in as `demo` / `demo`. Use `Alt+*` keybinds (host desktops eat `Super`).
 
 ```sh
 nix build github:wighawag/wasisabi#iso-netinstall   # small, needs a network
-nix build github:wighawag/wasisabi#iso-offline      # carries the packages too
+nix build github:wighawag/wasisabi#iso-offline      # carries everything, model included: installs with no network
 # write result/iso/*.iso to a USB stick, boot it, then:
 sudo wasisabi-install
 ```

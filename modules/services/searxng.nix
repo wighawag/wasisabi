@@ -35,9 +35,14 @@ let
   };
   pythonEnv = uwsgiPackage.python3.withPackages (_: [ cfg.package ]);
 
-  yaml = pkgs.formats.yaml { };
-
-  settingsFile = yaml.generate "wasisabi-searxng-settings.yml" (
+  # JSON, WHICH IS VALID YAML, written with writeText rather than
+  # pkgs.formats.yaml. The content depends on installer answers (egress through
+  # Tor or not), so an OFFLINE install builds this file on the target, and the
+  # YAML generator needs remarshal, i.e. a Python toolchain the medium does not
+  # carry: an offline install once set out to rebuild 1042 derivations for it.
+  # writeText needs nothing but the builder that every system already has.
+  settingsFile = pkgs.writeText "wasisabi-searxng-settings.yml" (
+    builtins.toJSON (
     lib.recursiveUpdate {
       use_default_settings = true;
       general = {
@@ -66,6 +71,7 @@ let
         proxies."all://" = cfg.egressProxies;
       };
     } cfg.settings
+    )
   );
 
   uwsgiJson = pkgs.writeText "wasisabi-searxng-uwsgi.json" (

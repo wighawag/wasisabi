@@ -66,7 +66,7 @@ Be precise about the last step of each of those, because the automated assertion
 | Medium | Size | Needs |
 |---|---|---|
 | `iso-netinstall` | 1.5G | a network |
-| `iso-offline` | 4.6G | nothing |
+| `iso-offline` | 8.5G | nothing (the local model's 4.2 GB included) |
 
 The offline image carries four payload systems, generated so that every value of every enum appears in at least one of them (`nix build .#checks.x86_64-linux.payload-coverage` prints the coverage), plus the build-time inputs for the handful of derivations that can never be prebuilt.
 

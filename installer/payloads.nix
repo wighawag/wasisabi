@@ -85,7 +85,14 @@ let
             };
             system.stateVersion = stateVersion;
 
-            wasisabi = settingsFor "system" index;
+            # AN OWNER, as every installed machine has one (the template sets
+            # wasisabi.user to the created account). It is a string option, so
+            # nothing above enumerates it; without it no payload carried the
+            # owner's pi, wherever or memonaut, and an offline target had to
+            # build them, and their toolchains, from source.
+            wasisabi = settingsFor "system" index // {
+              user = "payload";
+            };
 
             home-manager.users.payload = {
               imports = [ self.homeModules.wasisabi ];
