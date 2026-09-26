@@ -43,12 +43,17 @@ let
 
   socketDir = "/run/wasisabi-llm";
 
+  # Where llama-server itself listens. The same as the public socket when the
+  # server runs from boot; a private one behind a socket-activated proxy when
+  # it starts on first use (`onDemand`), so clients see one path either way.
+  serverSocket = if cfg.onDemand then "/run/wasisabi-llm-server/llm.sock" else cfg.socketPath;
+
   # The llama-server command line. `--host` ending in `.sock` is llama.cpp's
   # own switch to AF_UNIX (tools/server/server-http.cpp), so no wrapper is
   # needed to serve the socket.
   serverArgs = [
     "--host"
-    cfg.socketPath
+    serverSocket
     "--model"
     "${cfg.model}"
     "--alias"
@@ -242,6 +247,21 @@ in
       '';
     };
 
+    onDemand = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+      description = ''
+        Start the server on FIRST USE instead of at boot. The socket exists from
+        boot either way; with this on, the first connection starts llama-server
+        (loading the model, seconds to tens of seconds), and it then stays up.
+
+        Off by default: on an installed machine the model's memory is mostly
+        reclaimable page cache and an instant first answer is worth more. The
+        live ISO turns it on, because there every file the session writes also
+        lives in RAM.
+      '';
+    };
+
     clientConfigFile = lib.mkOption {
       type = lib.types.str;
       readOnly = true;
@@ -266,26 +286,34 @@ in
 
     systemd.services.wasisabi-llm = {
       description = "Local model server (llama.cpp, unix socket)";
-      wantedBy = [ "multi-user.target" ];
+      wantedBy = lib.mkIf (!cfg.onDemand) [ "multi-user.target" ];
       serviceConfig = {
         ExecStart = "${cfg.package}/bin/llama-server ${lib.escapeShellArgs serverArgs}";
-        # llama-server creates the socket itself; wait until it exists so a
-        # unit ordered after this one does not race the model load.
+        # READY MEANS THE MODEL IS LOADED, not that the socket exists.
+        # llama-server creates its socket first and answers every request with
+        # `503 Loading model` until the weights are in, so waiting for the
+        # socket alone let the first client in early (seen on the live ISO:
+        # the request that started the server got a 503 in 0.26 s). /health
+        # turns 200 when it can serve, and anything ordered after this unit
+        # (the on-demand proxy, above all) waits for that.
         ExecStartPost = pkgs.writeShellScript "wasisabi-llm-wait" ''
-          for _ in $(seq 1 600); do
-            [ -S ${cfg.socketPath} ] && exit 0
-            sleep 0.2
+          for _ in $(seq 1 1200); do
+            ${lib.getExe pkgs.curl} -sf -o /dev/null --unix-socket ${serverSocket} http://localhost/health && exit 0
+            sleep 0.5
           done
-          echo "wasisabi-llm: ${cfg.socketPath} did not appear within 120s" >&2
+          echo "wasisabi-llm: not ready within 600s (${serverSocket})" >&2
           exit 1
         '';
+        # Loading from a USB stick, or on a slow disk, is well past the 90 s
+        # default.
+        TimeoutStartSec = "630";
         Restart = "on-failure";
         RestartSec = "5s";
         User = "wasisabi-llm";
         Group = cfg.clientGroup;
         # The socket inherits this: owner and group rw, nobody else.
         UMask = "0007";
-        RuntimeDirectory = "wasisabi-llm";
+        RuntimeDirectory = if cfg.onDemand then "wasisabi-llm-server" else "wasisabi-llm";
         RuntimeDirectoryMode = "0750";
 
         # NO NETWORK AT ALL: see the module header. The socket is a file, so
@@ -313,6 +341,42 @@ in
         # Inference is CPU work; never let it starve the desktop.
         Nice = 5;
         CPUWeight = 50;
+      };
+    };
+
+    # ON DEMAND: the public socket belongs to systemd from boot, with the same
+    # owner, group and mode llama-server would give it, and the first
+    # connection starts a proxy that pulls the server up (Requires/After waits
+    # for its ExecStartPost, i.e. for the model to be loaded) and forwards to
+    # its private socket.
+    systemd.tmpfiles.rules = lib.mkIf cfg.onDemand [
+      "d ${socketDir} 0750 wasisabi-llm ${cfg.clientGroup} -"
+    ];
+    systemd.sockets.wasisabi-llm-proxy = lib.mkIf cfg.onDemand {
+      description = "Local model server socket (starts the server on first use)";
+      wantedBy = [ "sockets.target" ];
+      socketConfig = {
+        ListenStream = cfg.socketPath;
+        SocketUser = "wasisabi-llm";
+        SocketGroup = cfg.clientGroup;
+        SocketMode = "0660";
+        RemoveOnStop = true;
+      };
+    };
+    systemd.services.wasisabi-llm-proxy = lib.mkIf cfg.onDemand {
+      description = "Start the local model server on first use, and forward to it";
+      requires = [ "wasisabi-llm.service" ];
+      after = [ "wasisabi-llm.service" ];
+      serviceConfig = {
+        ExecStart = "${config.systemd.package}/lib/systemd/systemd-socket-proxyd ${serverSocket}";
+        DynamicUser = true;
+        SupplementaryGroups = [ cfg.clientGroup ];
+        PrivateNetwork = true;
+        ProtectSystem = "strict";
+        ProtectHome = true;
+        PrivateTmp = true;
+        NoNewPrivileges = true;
+        RestrictAddressFamilies = [ "AF_UNIX" ];
       };
     };
 

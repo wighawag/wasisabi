@@ -1,18 +1,21 @@
 # The installer ISO, in two variants.
 #
-# NO LIVE DESKTOP, AND THAT IS A DECISION RATHER THAN AN OMISSION. niri
-# refuses to run on a software EGL renderer, so a graphical installer ISO
-# would show a black screen on exactly the machines people try it on first
-# (QEMU without virtio-vga-gl, anything with no render node) while niri sat
-# there running perfectly with a live Wayland socket. A text installer that
-# always works beats a graphical one that fails in a way nobody can read. The
-# installed system is the graphical thing; the medium that installs it is not.
-#
 # Variants:
-#   netinstall  small (~1G). Evaluates from the sources on the medium, fetches
-#               packages from cache.nixos.org. Needs a network.
-#   offline     large. Carries the package closures too, so a machine with no
-#               network at all still gets the same system.
+#   netinstall  small (~1.5G), TEXT ONLY. Evaluates from the sources on the
+#               medium, fetches packages from cache.nixos.org. Needs a network.
+#   offline     large (~9G), and LIVE: it boots into the wasisabi desktop so it
+#               can be tried before installing, and it carries the package
+#               closures too, so a machine with no network at all still gets
+#               the same system. Its boot menu also has a text-only entry that
+#               is exactly the old installer.
+#
+# THE LIVE DESKTOP HAS TO FAIL LEGIBLY, which is why the netinstall medium
+# stayed text-only for so long. niri refuses to run on a software EGL renderer,
+# so on a machine with no GPU render node (QEMU without virtio-vga-gl, an
+# unsupported GPU) a naive live desktop is a black screen with niri running
+# perfectly behind it. The live session therefore checks for a render node
+# first and, without one, lands in a text shell that says why and how to
+# install, instead of starting the compositor. See `liveSession` below.
 #
 # Both carry the wasisabi source and the pinned lock, so the ISO installs the
 # exact revision it was built from rather than whatever is on the internet
@@ -32,6 +35,10 @@
   sources,
   wasisabiRev,
   offline ? false,
+  # The live desktop (the offline medium). Needs the wasisabi modules, which
+  # the flake passes in as `wasisabiModules`.
+  live ? false,
+  wasisabiModules ? null,
   payloads ? [ ],
   # Unattended install, for the end-to-end VM test. Never set on media meant
   # for a person: it partitions the disk named in the answers file without
@@ -41,7 +48,14 @@
 }:
 
 {
-  imports = [ (modulesPath + "/installer/cd-dvd/installation-cd-minimal.nix") ];
+  imports = [
+    (modulesPath + "/installer/cd-dvd/installation-cd-minimal.nix")
+  ]
+  ++ lib.optionals live [
+    wasisabiModules.system
+    wasisabiModules.homeManager
+    ./live.nix
+  ];
 
   # `image.baseName`, not `isoImage.isoName`: the latter still evaluates but is
   # renamed, and setting it produces a deprecation warning plus a filename that

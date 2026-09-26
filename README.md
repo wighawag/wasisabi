@@ -129,7 +129,7 @@ Log in as `demo` / `demo`. Use `Alt+*` keybinds (host desktops eat `Super`).
 
 ```sh
 nix build github:wighawag/wasisabi#iso-netinstall   # small, needs a network
-nix build github:wighawag/wasisabi#iso-offline      # carries everything, model included: installs with no network
+nix build github:wighawag/wasisabi#iso-offline      # LIVE: try it first; carries everything, installs with no network
 # write result/iso/*.iso to a USB stick, boot it, then:
 sudo wasisabi-install
 ```
@@ -138,7 +138,9 @@ It asks for the machine's identity (hostname, user, password, timezone, locale, 
 
 What it leaves behind is **an ordinary flake you own** at `/etc/nixos`: `flake.nix`, `configuration.nix`, the `hardware-configuration.nix` it generated, and a `flake.lock` pinned to exactly the revision the ISO installed. It is a git repo with one commit. Nothing reads it back, nothing manages it, and removing the two module imports leaves you with a working NixOS machine that has never heard of wasi-sabi.
 
-There is **no live desktop on the ISO**, deliberately: niri refuses a software EGL renderer, so a graphical installer would show a black screen on exactly the machines people test on first. The installed system is the graphical thing.
+**The offline ISO is a live system.** It boots straight into the wasisabi desktop (user `nixos`, no password), so the machine can be tried before anything touches its disk: a welcome terminal says what to try and holds the install command. Everything runs from the stick and from RAM; the local model starts on first use rather than at boot, to spare that RAM. Its boot menu also has a **text installer only** entry, which is the plain installer with no desktop.
+
+niri refuses a software renderer, so a live desktop on a machine with no usable GPU would be a black screen with niri running behind it. The live session therefore waits for the GPU driver and, if there is still no render node, starts a text shell that says so and how to install instead. The netinstall ISO stays text-only and small.
 
 The installer also runs unattended, with the same questions in a file:
 

@@ -118,6 +118,15 @@ lib.mkIf cfg.enable {
     enable = lib.mkDefault true;
     nix-direnv.enable = lib.mkDefault true;
   };
+  # On the Linux text console the icons draw as boxes (no Nerd Font there),
+  # so the same commands without them.
+  programs.bash.interactiveShellInit = lib.mkIf cfg.bash.enable (
+    lib.mkAfter ''
+      if [[ $TERM == linux ]]; then
+        alias ls='eza --group-directories-first' ll='eza -la --git'
+      fi
+    ''
+  );
   environment.shellAliases = lib.mkIf cfg.bash.enable (
     lib.mapAttrs (_: lib.mkOverride 900) {
       ls = "eza --icons --group-directories-first";

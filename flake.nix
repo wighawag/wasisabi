@@ -115,6 +115,15 @@
           inherit system;
           specialArgs = {
             inherit offline autotest;
+            # The offline medium is the LIVE one: it carries the whole desktop
+            # anyway, so booting into it costs little, and it lets the machine
+            # be tried before anything touches its disk (hosts/live.nix).
+            live = offline;
+            wasisabiModules = {
+              system = self.nixosModules.wasisabi;
+              home = self.homeModules.wasisabi;
+              homeManager = home-manager.nixosModules.home-manager;
+            };
             installer = mkInstaller { inherit offline; };
             nixpkgsSource = nixpkgs;
             # Everything the generated flake.lock names, so that the install

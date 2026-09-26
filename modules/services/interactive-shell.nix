@@ -263,7 +263,10 @@ in {
           unset FZF_CTRL_R_COMMAND
           eval "$(${lib.getExe pkgs.zoxide} init bash)"
           eval "$(${lib.getExe pkgs.atuin} init bash --disable-up-arrow --disable-ai)"
-          eval "$(${lib.getExe pkgs.starship} init bash)"
+          # WASISABI: not on the Linux text console, whose font has none of the
+          # powerline shapes or Nerd Font icons, so the prompt drew as boxes
+          # (seen on the live ISO's VT). Plain bash's prompt there instead.
+          [[ $TERM != linux ]] && eval "$(${lib.getExe pkgs.starship} init bash)"
           [[ ''${BLE_VERSION-} ]] && ble-attach
         fi
       '')

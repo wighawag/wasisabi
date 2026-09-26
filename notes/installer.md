@@ -17,7 +17,9 @@ The installer's own emit step is runnable without a disk anywhere near it, which
 
 ## The decisions
 
-**A text installer, not a graphical one.** niri refuses to run on a software EGL renderer, so a graphical installer ISO shows a black screen on exactly the machines people try first (QEMU without `virtio-vga-gl`, anything with no render node) while niri runs perfectly in the background. A text installer that always works beats a graphical one that fails illegibly. The ISO therefore ships no live desktop at all: the installed system is the graphical thing, the medium that installs it is not.
+**A text installer, not a graphical one.** niri refuses to run on a software EGL renderer, so a graphical installer shows a black screen on exactly the machines people try first (QEMU without `virtio-vga-gl`, anything with no render node) while niri runs perfectly in the background. The installer itself therefore stays a text program that always works.
+
+**Since 2026-09-26 the offline ISO is also a live desktop** (hosts/live.nix), which that same black screen had ruled out until the failure could be made legible: the live session waits for udev and the GPU driver, then starts niri only if a render node exists, and otherwise a text shell that says why and how to install. A "text installer only" boot entry (a specialisation) is the old medium exactly. Three things found building it, all measured on a GPU-backed VM: the render-node test first used `compgen -G`, which does not exist in the non-interactive bash scripts run under, so it failed silently on a machine with a GPU; NixOS's minimal installer profile turns off fontconfig, icons, MIME, autostart and udisks2, which a desktop needs back; and gnome-keyring greets a passwordless autologin with "choose a password for a new keyring", so the live session runs without it. The netinstall ISO stays text-only.
 
 **One implementation, two entry points.** The interactive TUI and the unattended answer file are the same code path: the TUI writes answers, `--answers` reads them. There is no second, less-tested code path for automation, and the VM test exercises the same installer a person runs.
 
