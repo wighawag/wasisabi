@@ -106,6 +106,28 @@ lib.mkIf cfg.enable {
   # The interactive bash stack (modules/services/interactive-shell.nix).
   wasisabi.services.interactiveShell.enable = lib.mkDefault cfg.bash.enable;
 
+  # What goes with that shell, for every account: direnv with nix-direnv
+  # (per-project dev environments; NixOS's own module hooks it into bash), and
+  # eza/bat behind the familiar names. Aliases only exist in interactive
+  # shells, so scripts and agents' tool shells still get the real ls and cat.
+  #
+  # mkOverride 900, not mkDefault: NixOS already sets `ls`/`ll` at mkDefault,
+  # and two mkDefault strings are a conflict. 900 beats that default while
+  # anything a machine writes (priority 100) still wins.
+  programs.direnv = lib.mkIf cfg.bash.enable {
+    enable = lib.mkDefault true;
+    nix-direnv.enable = lib.mkDefault true;
+  };
+  environment.shellAliases = lib.mkIf cfg.bash.enable (
+    lib.mapAttrs (_: lib.mkOverride 900) {
+      ls = "eza --icons --group-directories-first";
+      ll = "eza -la --icons --git";
+      cat = "bat --style=plain";
+      g = "git";
+      nrs = "sudo nixos-rebuild switch --flake";
+    }
+  );
+
   # Small opinionated CLI base for any TTY session.
   environment.systemPackages = with pkgs; [
     git
@@ -114,5 +136,9 @@ lib.mkIf cfg.enable {
     fd
     btop
     tmux
+  ]
+  ++ lib.optionals cfg.bash.enable [
+    eza
+    bat
   ];
 }

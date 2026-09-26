@@ -232,12 +232,11 @@ myboxes.nixosConfigurations.somehost.extendModules {
 - The **home layer** currently needs home-manager **master**: it configures
   `wayland.windowManager.niri`, which landed in HM after the 26.05 branch and
   does not exist in `home-manager/release-26.05`.
-- Pairing HM master with a *stable* nixpkgs pin surfaces assertion skew; the
-  one hit so far is fzf (HM master wants ≥ 0.73.0 for nushell integration,
-  26.05 ships 0.72.0). If you use a POSIX shell rather than nushell:
-  ```nix
-  programs.fzf.enableNushellIntegration = false;
-  ```
+- Pairing HM master with a *stable* nixpkgs pin can surface assertion skew.
+  The one hit so far was fzf (HM master wanted ≥ 0.73.0 for nushell
+  integration, 26.05 ships 0.72.0); the home layer no longer enables HM's fzf
+  (the shell lives in the system layer now), so it no longer applies to
+  wasisabi's own settings.
 
 
 ## The compositor
