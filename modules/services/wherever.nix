@@ -95,6 +95,26 @@ in
       '';
     };
 
+    allowPrivilegeEscalation = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
+      description = ''
+        Let `sudo` work inside wherever sessions, which is what makes
+        wherever's own sudo prompt usable: when YOU type `!sudo ...` in the web
+        UI, it asks you for your password in a masked field and passes it to
+        sudo once, without storing it.
+
+        This does not make sudo ambient: sudo still wants the password
+        (NixOS's default), and an agent does not know it. What it changes is
+        whether the password CAN work at all. With it off, the unit sets
+        NoNewPrivileges, the kernel ignores setuid, and sudo refuses whatever
+        is typed.
+
+        Turn it off on a machine whose owner has passwordless sudo (the live
+        ISO does), since there it would hand agents root.
+      '';
+    };
+
     memoryMax = lib.mkOption {
       type = lib.types.str;
       default = "4G";
@@ -148,9 +168,9 @@ in
         StateDirectory = "wherever";
         StateDirectoryMode = "0700";
         MemoryMax = cfg.memoryMax;
-        # Agent sessions never gain privileges through this unit: a `sudo` a
-        # session runs is refused by the kernel, password or not.
-        NoNewPrivileges = true;
+        # See allowPrivilegeEscalation: with it off, a `sudo` a session runs is
+        # refused by the kernel, password or not.
+        NoNewPrivileges = !cfg.allowPrivilegeEscalation;
       };
     };
   };

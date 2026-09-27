@@ -40,6 +40,8 @@ or to leave it.
 | Coding agent | pi, with wherever (a web UI for its sessions) | MIT / AGPL |
 | Search | SearXNG + webveil (no account, no profile) | AGPL |
 | Recall | memonaut (search your past agent sessions) | AGPL |
+| Browser automation | webhands on nixpkgs' Chromium | AGPL / BSD |
+| Terminal tools | zellij, direnv, eza, bat; nix-ld for foreign binaries | MIT / Apache |
 | Anonymous accounts | anonctl: every packet forced through Tor, fail-closed | AGPL |
 
 ## AI and privacy, on the machine

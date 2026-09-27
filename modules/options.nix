@@ -170,6 +170,46 @@
       description = "XKB options, comma-separated. Empty means none.";
     };
 
+    mdns.enable = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
+      description = ''
+        Announce this machine on the local network as <hostname>.local, and
+        find other machines by their .local names (mDNS, via Avahi), so
+        `ssh mybox.local` works on a home network with no DNS set up.
+
+        The trade: on a network you do not trust (a café, a hotel), everyone
+        on it can see this machine's hostname. Resolving other machines'
+        .local names stays on either way while printing is on, since that is
+        how printers are found; this option decides whether THIS machine
+        announces itself.
+      '';
+    };
+
+    nixLd.enable = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
+      description = ''
+        Run binaries built for other Linux distributions (nix-ld): toolchains
+        that download their own compilers (rustup, Foundry), Playwright's
+        browsers, VS Code-style remote servers, prebuilt release binaries.
+        NixOS has no /lib64/ld-linux-x86-64.so.2 by default, so without this
+        they fail with a misleading "No such file or directory". It adds that
+        loader and a set of common libraries; it runs nothing by itself.
+      '';
+    };
+
+    zellij.enable = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
+      description = ''
+        zellij, a terminal multiplexer: panes, tabs, and sessions that survive
+        a closed terminal or a dropped ssh connection (`zellij attach`). Comes
+        with a declared keybind set (modules/zellij-config.kdl), which starts
+        LOCKED so it never steals keys from the program inside: Ctrl+G unlocks.
+      '';
+    };
+
     bash.enable = lib.mkOption {
       type = lib.types.bool;
       default = true;
@@ -255,7 +295,8 @@
         The pi coding agent for the machine's owner, set up to use the local
         model and private search, with memonaut (search your past agent
         conversations) and wherever (a web UI for agent sessions, on this
-        machine only: run `wherever-link` for its address).
+        machine only: run `wherever-link` for its address), and webhands (drive
+        a real browser from the command line, on nixpkgs' free Chromium).
       '';
     };
 

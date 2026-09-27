@@ -103,6 +103,22 @@ lib.mkIf cfg.enable {
   # Compressed-RAM swap: safe on any machine, no partition required.
   zramSwap.enable = lib.mkDefault cfg.zram.enable;
 
+  # Binaries built for other distributions (see wasisabi.nixLd). The default
+  # library set only; add to programs.nix-ld.libraries when a binary names one.
+  programs.nix-ld.enable = lib.mkIf cfg.nixLd.enable (lib.mkDefault true);
+
+  # zellij with the declared keybinds. ZELLIJ_CONFIG_FILE rather than only the
+  # /etc copy, because zellij reads ~/.config/zellij/config.kdl BEFORE /etc, so
+  # a file its first-run wizard once wrote would otherwise silently win. Both
+  # at mkDefault, so a machine that ships its own zellij config replaces this
+  # one instead of conflicting with it.
+  environment.etc."zellij/config.kdl".source = lib.mkIf cfg.zellij.enable (
+    lib.mkDefault ./zellij-config.kdl
+  );
+  environment.variables.ZELLIJ_CONFIG_FILE = lib.mkIf cfg.zellij.enable (
+    lib.mkDefault "/etc/zellij/config.kdl"
+  );
+
   # The interactive bash stack (modules/services/interactive-shell.nix).
   wasisabi.services.interactiveShell.enable = lib.mkDefault cfg.bash.enable;
 
@@ -149,5 +165,6 @@ lib.mkIf cfg.enable {
   ++ lib.optionals cfg.bash.enable [
     eza
     bat
-  ];
+  ]
+  ++ lib.optional cfg.zellij.enable zellij;
 }

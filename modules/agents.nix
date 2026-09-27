@@ -136,7 +136,12 @@ lib.mkIf cfg.enable (
         user = lib.mkDefault cfg.user;
       };
 
-      environment.systemPackages = [ wp.memonaut ];
+      # webhands drives a browser (nixpkgs' free Chromium) from the command
+      # line, for agents and people; the use-webhands skill documents it.
+      environment.systemPackages = [
+        wp.memonaut
+        wp.webhands
+      ];
     })
 
     # The owner reaches the socket-served services through their groups.
@@ -199,6 +204,16 @@ lib.mkIf cfg.enable (
           memonaut-pi = lib.mkDefault wp.memonaut-pi;
           pi-wasisabi-local = lib.mkIf cfg.llm.enable (lib.mkDefault wp.pi-wasisabi-local);
         };
+        # A browser per account, for what web_fetch cannot see (pages that
+        # render in the client). It runs AS the account, so its traffic is
+        # forced through that account's Tor circuit like everything else, with
+        # a profile per account under ~/.webhands. Headless: nothing here gives
+        # an anon account a display.
+        browser = {
+          enable = lib.mkDefault true;
+          package = lib.mkDefault wp.webhands;
+        };
+        skills.use-webhands = lib.mkDefault "${wp.webhands}/share/agent-skills/use-webhands";
         provider = lib.mkDefault svc.llm.providerId;
         models = lib.mkIf cfg.llm.enable (lib.mkDefault llmModels);
         defaultModel = lib.mkIf cfg.llm.enable (lib.mkDefault svc.llm.modelId);

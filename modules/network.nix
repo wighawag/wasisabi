@@ -18,6 +18,20 @@ lib.mkIf cfg.enable {
 
   networking.modemmanager.enable = lib.mkIf cfg.cellular.enable (lib.mkDefault true);
 
+  # mDNS: announce <hostname>.local and resolve other machines' .local names.
+  # Per leaf rather than one mkDefault attrset, so it merges with the printing
+  # half in core.nix (which enables resolution for printer discovery) and with
+  # a machine's own avahi settings instead of racing them.
+  services.avahi = lib.mkIf cfg.mdns.enable {
+    enable = lib.mkDefault true;
+    nssmdns4 = lib.mkDefault true;
+    openFirewall = lib.mkDefault true;
+    publish = {
+      enable = lib.mkDefault true;
+      addresses = lib.mkDefault true;
+    };
+  };
+
   # A Tor CLIENT: SOCKS5 on loopback, nothing else. `client.enable` is the
   # part that actually opens the port -- a bare `services.tor.enable` runs a
   # daemon that proxies nothing.

@@ -118,6 +118,10 @@ in
   # it), so the model loads on first use rather than at boot.
   wasisabi.services.llm.onDemand = true;
 
+  # The live user has PASSWORDLESS sudo (NixOS's installation-device profile),
+  # so a working sudo in wherever sessions would be root for any agent.
+  wasisabi.services.wherever.allowPrivilegeEscalation = false;
+
   services.greetd.settings = {
     initial_session = {
       user = "nixos";

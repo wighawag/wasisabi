@@ -44,4 +44,5 @@ in
   memonaut = import ./memonaut.nix { inherit pkgs; };
   memonaut-pi = import ./memonaut-pi.nix { inherit pkgs; };
   pi-wasisabi-local = import ./pi-wasisabi-local { inherit pkgs; };
+  webhands = import ./webhands.nix { inherit pkgs; };
 }
