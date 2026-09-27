@@ -50,7 +50,7 @@ A wasisabi machine comes with an assistant that needs no account anywhere: a sma
 
 It also comes with three **anonymous accounts** (`anon`, `anon-john`, `anon-jane`) whose every connection the kernel forces through Tor, fail-closed: if Tor is down they have no network, never your address. Each is proven with `anonctl verify` before it is used, carries nothing of yours, and has its own agent (on the same local model, reached over a unix socket so their jail needs no exemption) and its own web UI (`sudo anon-reconcile links`).
 
-All of it is on by default and each part is one option (`wasisabi.llm.enable`, `.search.enable`, `.agents.enable`, `.anon.enable`); the installer asks. How it fits together, what was verified and what was not: [`notes/agents.md`](notes/agents.md).
+The building blocks live in [nixos-modules](https://github.com/wighawag/nixos-modules), usable on any NixOS machine; wasisabi switches them on. All of it is on by default and each part is one option (`wasisabi.llm.enable`, `.search.enable`, `.agents.enable`, `.anon.enable`); the installer asks. How it fits together, what was verified and what was not: [`notes/agents.md`](notes/agents.md).
 
 ## Architecture
 

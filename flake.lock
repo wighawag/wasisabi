@@ -60,6 +60,27 @@
         "type": "github"
       }
     },
+    "nixos-modules": {
+      "inputs": {
+        "nixpkgs": [
+          "nixpkgs"
+        ],
+        "wherever": "wherever"
+      },
+      "locked": {
+        "lastModified": 1790489000,
+        "narHash": "sha256-G8Z29sDumRwD1H8yczR5XJwGMFTvRjZpt0cufdfujRg=",
+        "owner": "wighawag",
+        "repo": "nixos-modules",
+        "rev": "bd299e756cc93afdfa3f8fad0a636bc7dcdc6b23",
+        "type": "github"
+      },
+      "original": {
+        "owner": "wighawag",
+        "repo": "nixos-modules",
+        "type": "github"
+      }
+    },
     "nixpkgs": {
       "locked": {
         "lastModified": 1788881743,
@@ -97,9 +118,9 @@
         "disko": "disko",
         "home-manager": "home-manager",
         "nixos-hardware": "nixos-hardware",
+        "nixos-modules": "nixos-modules",
         "nixpkgs": "nixpkgs",
-        "noctalia": "noctalia",
-        "wherever": "wherever"
+        "noctalia": "noctalia"
       }
     },
     "wherever": {

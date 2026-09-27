@@ -31,8 +31,8 @@
 # group, which this module grants to the owner and to each anon account.
 let
   cfg = config.wasisabi;
-  svc = config.wasisabi.services;
-  wp = config.wasisabi.pkgs;
+  svc = config.nixos-modules;
+  wp = config.nixos-modules.pkgs;
   hasUser = cfg.user != "";
 
   llmModels = [
@@ -91,12 +91,12 @@ lib.mkIf cfg.enable (
   lib.mkMerge [
     # ── the local model ──
     (lib.mkIf cfg.llm.enable {
-      wasisabi.services.llm.enable = lib.mkDefault true;
+      nixos-modules.llm.enable = lib.mkDefault true;
     })
 
     # ── private search ──
     (lib.mkIf cfg.search.enable {
-      wasisabi.services.searxng = {
+      nixos-modules.searxng = {
         enable = lib.mkDefault true;
         egressProxies = lib.mkIf cfg.search.viaTor (lib.mkDefault [ torSocks ]);
         requestTimeout = lib.mkIf cfg.search.viaTor (lib.mkDefault 10.0);
@@ -106,7 +106,7 @@ lib.mkIf cfg.enable (
 
     # ── the owner's agent ──
     (lib.mkIf (cfg.agents.enable && hasUser) {
-      wasisabi.services.piUser = {
+      nixos-modules.piUser = {
         enable = lib.mkDefault true;
         user = lib.mkDefault cfg.user;
         extensions = {
@@ -131,7 +131,7 @@ lib.mkIf cfg.enable (
         );
       };
 
-      wasisabi.services.wherever = {
+      nixos-modules.wherever = {
         enable = lib.mkDefault true;
         user = lib.mkDefault cfg.user;
       };
@@ -182,17 +182,17 @@ lib.mkIf cfg.enable (
         pkgs.nftables
       ];
 
-      wasisabi.services.anonAccounts = {
+      nixos-modules.anonAccounts = {
         enable = lib.mkDefault true;
         accounts = lib.mkDefault cfg.anon.accounts;
       };
-      wasisabi.services.anonctlUnits = {
+      nixos-modules.anonctlUnits = {
         enable = lib.mkDefault true;
         package = lib.mkDefault wp.anonctl;
       };
-      wasisabi.services.anonDns.enable = lib.mkDefault true;
+      nixos-modules.anonDns.enable = lib.mkDefault true;
 
-      wasisabi.services.anonHome = {
+      nixos-modules.anonHome = {
         enable = lib.mkDefault true;
         # web_fetch needs no backend and leaves through the account's own
         # circuit; web_search uses the per-account SearXNG below.
@@ -219,13 +219,13 @@ lib.mkIf cfg.enable (
         defaultModel = lib.mkIf cfg.llm.enable (lib.mkDefault svc.llm.modelId);
       };
 
-      wasisabi.services.anonSearch.enable = lib.mkDefault true;
+      nixos-modules.anonSearch.enable = lib.mkDefault true;
 
-      wasisabi.services.whereverAnon = {
+      nixos-modules.whereverAnon = {
         enable = lib.mkDefault true;
         reconcile.enable = lib.mkDefault true;
       };
-      wasisabi.services.anonDispatcher.enable = lib.mkDefault true;
+      nixos-modules.anonDispatcher.enable = lib.mkDefault true;
 
       # Each anon account may reach the local model's socket, and nothing else
       # of the owner's.

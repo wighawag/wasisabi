@@ -119,8 +119,8 @@ lib.mkIf cfg.enable {
     lib.mkDefault "/etc/zellij/config.kdl"
   );
 
-  # The interactive bash stack (modules/services/interactive-shell.nix).
-  wasisabi.services.interactiveShell.enable = lib.mkDefault cfg.bash.enable;
+  # The interactive bash stack (nixos-modules' modules/interactive-shell.nix).
+  nixos-modules.interactiveShell.enable = lib.mkDefault cfg.bash.enable;
 
   # What goes with that shell, for every account: direnv with nix-direnv
   # (per-project dev environments; NixOS's own module hooks it into bash), and

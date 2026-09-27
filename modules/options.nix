@@ -261,7 +261,7 @@
         anonymous accounts can use without a hole in their jail.
 
         Costs the download and, while answering, CPU. Idle, it costs memory the
-        kernel can reclaim. See wasisabi.services.llm.* to change the model.
+        kernel can reclaim. See nixos-modules.llm.* to change the model.
       '';
     };
 

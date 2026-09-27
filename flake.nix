@@ -18,16 +18,15 @@
       flake = false;
     };
 
-    # The wherever server (a web UI driving pi agent sessions), as SOURCE: its
-    # `package.nix` is a plain function of pkgs, so it builds against the
-    # consumer's nixpkgs instead of dragging its own pin into every closure.
-    # Pinned to the commit tagged wherever-dev@0.17.0, the release the my-boxes
-    # fleet runs (0.16.0+ is required: unix socket support, which is the only
-    # interface an anon account can serve). Its server/package.json also
-    # decides which Pi version the `pi` CLI is built at; see pkgs/default.nix.
-    wherever = {
-      url = "github:wighawag/wherever/c46fe265bd5a7d266894f71b9bd63583593c0280";
-      flake = false;
+    # The agent layer's building blocks (local model, search, pi, wherever,
+    # the anon accounts, the interactive bash) and the packages they run.
+    # They live in their own repository so machines that are not wasisabi
+    # desktops can use them too; wasisabi's modules/agents.nix switches them
+    # on. Following our nixpkgs keeps one nixpkgs in the lock (the modules take
+    # `pkgs` from the importing system anyway).
+    nixos-modules = {
+      url = "github:wighawag/nixos-modules";
+      inputs.nixpkgs.follows = "nixpkgs";
     };
 
     # Used by the INSTALLER only (partitioning, and the hardware module the
@@ -53,7 +52,7 @@
       nixpkgs,
       home-manager,
       noctalia,
-      wherever,
+      nixos-modules,
       disko,
       nixos-hardware,
       ...
@@ -133,7 +132,8 @@
               nixpkgs
               home-manager
               noctalia
-              wherever
+              nixos-modules
+              nixos-modules.inputs.wherever
               disko
               nixos-hardware
             ];
@@ -182,12 +182,13 @@
       # System-level layer: services, programs, sane hardware-agnostic defaults.
       # Knows nothing about your disks, drivers or CPU.
       #
-      # The source trees the agent layer builds from are injected the same way
-      # noctaliaSrc is for the home layer, so the pin lives in flake.lock and a
-      # consumer wires nothing.
+      # It includes nixos-modules' building blocks, which modules/agents.nix
+      # switches on; a consumer imports this one module and gets both.
       nixosModules.wasisabi = {
-        imports = [ ./modules ];
-        _module.args.wasisabiSources = { inherit wherever; };
+        imports = [
+          ./modules
+          nixos-modules.nixosModules.default
+        ];
       };
 
       # User-level layer: apps, dotfiles, keybinds, theming.
@@ -254,14 +255,11 @@
       };
 
       packages.${system} =
-        # The agent layer's packages, built here against this repo's pin so they
-        # can be built and cached on their own (`nix build .#anonctl`). The
-        # modules do NOT use these: they build the same files against the
-        # importing system's pkgs.
-        (import ./pkgs {
-          inherit pkgs;
-          sources = { inherit wherever; };
-        })
+        # The agent layer's packages: nixos-modules' own, which build against
+        # our nixpkgs through its follows, so they can be built and cached here
+        # (`nix build .#anonctl`). The modules do not use these: they build the
+        # same files against the importing system's pkgs.
+        nixos-modules.packages.${system}
         // {
         default = self.packages.${system}.installer;
         installer = mkInstaller { offline = false; };
@@ -350,7 +348,7 @@
             {
               name = "search through Tor, answered, reaches SearXNG";
               expected = [ "socks5h://127.0.0.1:9050" ];
-              actual = c.wasisabi.services.searxng.egressProxies;
+              actual = c.nixos-modules.searxng.egressProxies;
             }
             {
               name = "a false answer is honoured (anon accounts)";
