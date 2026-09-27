@@ -50,14 +50,16 @@ let
     type = "custom_button"
     glyph = "robot"
     tooltip = "Assistant"
-    command = "wasisabi-assistant"
+
+    [widget.assistant.actions]
+    left = "exec wasisabi-assistant"
   '';
 
   seed = pkgs.writeText "noctalia-config.toml" (''
     # Seeded ONCE by wasisabi on first login, then yours. Edit freely, in this
     # file or in Noctalia's settings GUI; nothing rewrites it.
     [shell]
-    font = "JetBrainsMono Nerd Font"
+    font_family = "JetBrainsMono Nerd Font"
 
     [theme]
     mode = "dark"

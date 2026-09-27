@@ -54,17 +54,22 @@ let
 
   open = pkgs.writeShellApplication {
     name = "wasisabi-assistant";
-    runtimeInputs = [ pkgs.libnotify pkgs.coreutils ];
+    runtimeInputs = [ pkgs.libnotify pkgs.coreutils pkgs.curl ];
     text = ''
       # wherever-link comes from the system profile, which a session spawned
       # by the compositor may not have on PATH.
       PATH="$PATH:/run/current-system/sw/bin"
 
-      # Right after boot wherever may still be minting its token, so give it a
-      # few seconds before reporting a failure.
+      # Wait for a link AND a server answering it. The link alone is not
+      # enough: the token file outlives a stopped wherever, so wherever-link
+      # still prints a URL and the browser would open on "Not connected".
+      # Right after boot the server may still be starting, hence the retries.
       url=""
       for _ in $(seq 1 10); do
-        if url=$(wherever-link 2>/dev/null); then break; fi
+        if url=$(wherever-link 2>/dev/null) \
+           && curl -s -o /dev/null --max-time 2 "''${url%%#*}"; then
+          break
+        fi
         url=""
         sleep 1
       done
@@ -81,18 +86,26 @@ let
 
   welcome = pkgs.writeShellApplication {
     name = "wasisabi-assistant-welcome";
-    runtimeInputs = [ pkgs.libnotify pkgs.coreutils pkgs.gnugrep pkgs.systemd ];
+    runtimeInputs = [ pkgs.libnotify pkgs.coreutils pkgs.gnugrep pkgs.systemd pkgs.niri ];
     text = ''
       stamp="$HOME/${stampRel}"
       [ -e "$stamp" ] && exit 0
 
-      # The notification daemon (mako or Noctalia) is another unit of the same
-      # session and may not own its bus name yet. Without one there is nobody
-      # to show the welcome to, so leave the stamp alone and try next login.
-      for _ in $(seq 1 30); do
-        if busctl --user call org.freedesktop.DBus /org/freedesktop/DBus \
-             org.freedesktop.DBus NameHasOwner s org.freedesktop.Notifications 2>/dev/null \
-             | grep -q true; then
+      # Is there a notification daemon to show the welcome to? Noctalia claims
+      # the bus name when its unit has started, which may be after this one;
+      # mako is D-Bus ACTIVATED, so it owns nothing until the first
+      # notification starts it. So: an owner is ready at once, an activatable
+      # daemon after a short grace (letting Noctalia claim the name first), and
+      # neither means nobody to show it to: leave the stamp, try next login.
+      bus() {
+        busctl --user call org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus "$@" 2>/dev/null
+      }
+      for i in $(seq 1 30); do
+        if bus NameHasOwner s org.freedesktop.Notifications | grep -q true; then
+          ready=1
+          break
+        fi
+        if [ "$i" -ge 5 ] && bus ListActivatableNames | grep -q '"org.freedesktop.Notifications"'; then
           ready=1
           break
         fi
@@ -105,15 +118,26 @@ let
       mkdir -p "$(dirname "$stamp")"
       touch "$stamp"
 
+      # Two actions, one per daemon: mako fires `default` when the body is
+      # clicked, while Noctalia shows only NAMED actions, as buttons, and a
+      # click on its body fires nothing. The body is short because Noctalia
+      # cuts a toast at three lines.
       action=$(notify-send --app-name=wasisabi --expire-time=0 --wait \
-        --action=default="Open the assistant" \
+        --action=default="Open" \
+        --action=open="Open the assistant" \
         "Your assistant is ready" \
-        "An AI that runs on this computer: no account, nothing sent to a cloud. It can search the web privately, read and write your files, and run commands when you ask. Open it any time with ${keyName}+A, from the launcher, or from the bar." \
+        "An AI running on this computer: no account, no cloud. ${keyName}+A opens it any time." \
         || true)
 
-      if [ "$action" = default ]; then
-        exec ${lib.getExe open}
-      fi
+      # Hand the launch to niri, as the keybind does, rather than exec'ing it:
+      # otherwise the browser would live in THIS unit's cgroup, and anything
+      # that stops the unit (a home-manager switch) would take it down too.
+      case "$action" in
+        default|open)
+          niri msg action spawn -- ${lib.getExe open} \
+            || systemd-run --user --collect ${lib.getExe open}
+          ;;
+      esac
     '';
   };
 in
