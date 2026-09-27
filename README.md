@@ -46,7 +46,7 @@ or to leave it.
 
 ## AI and privacy, on the machine
 
-A wasisabi machine comes with an assistant that needs no account anywhere: a small open-weights model running on the CPU, private web search, and the pi coding agent wired to both, plus a web UI for its sessions on this machine only (`wherever-link` prints the address).
+A wasisabi machine comes with an assistant that needs no account anywhere: a small open-weights model running on the CPU, private web search, and the pi coding agent wired to both, plus a web UI for its sessions on this machine only. Open it with `Super+A`, the "Assistant" launcher entry or the bar button (the first login says hello with a notification); `wherever-link` prints the address.
 
 It also comes with three **anonymous accounts** (`anon`, `anon-john`, `anon-jane`) whose every connection the kernel forces through Tor, fail-closed: if Tor is down they have no network, never your address. Each is proven with `anonctl verify` before it is used, carries nothing of yours, and has its own agent (on the same local model, reached over a unix socket so their jail needs no exemption) and its own web UI (`sudo anon-reconcile links`).
 
@@ -276,6 +276,7 @@ The other two keyboards are the text ones. The option also switches on `console.
 | `Super+Enter` | Terminal |
 | `Super+D` | Launcher (fuzzel) |
 | `Super+B` / `Super+E` | Browser / Files |
+| `Super+A` | The assistant (the local AI's web UI) |
 | `Super+Q` | Close window (`Super+Shift+Q` quits, with confirmation) |
 | `Super+H/J/K/L` | Focus: left/right move between columns, up/down within one |
 | `Super+Ctrl+H/J/K/L` | Move the window (Ctrl, not Shift: `Super+Shift+L` is lock) |

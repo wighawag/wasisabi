@@ -11,7 +11,7 @@ With the defaults (every option below is `true` unless stated), a fresh install 
 | Local model | llama.cpp on the CPU, Gemma 4 E4B QAT (Apache-2.0, 4.2 GB), no network of its own | `/run/wasisabi-llm/llm.sock`, plus `127.0.0.1:11435` |
 | Search | SearXNG, socket-activated; `webveil` CLI | `/run/wasisabi-search/search.sock` |
 | The owner's agent | pi with three store extensions: the local model, web search/fetch, recall over past sessions; memonaut CLI | `~/.pi/agent/settings.json` (seeded) |
-| The owner's web UI | wherever, loopback only, token minted on the machine; `sudo` works after a password typed into its masked prompt | `wherever-link` prints the URL |
+| The owner's web UI | wherever, loopback only, token minted on the machine; `sudo` works after a password typed into its masked prompt | `Super+A`, the "Assistant" launcher entry, the bar button; `wherever-link` prints the URL |
 | A browser for agents | webhands on nixpkgs' free Chromium (not Chrome for Testing, which ships the proprietary Widevine module); each anon account has its own, forced through Tor | `webhands serve`, then `webhands goto ...` |
 | Anonymous accounts | `anon`, `anon-john`, `anon-jane`: every connection forced through Tor by anonctl, fail-closed, each proven with `anonctl verify` | `sudo anonctl use anon` |
 | Their agent | pi on the local model (over the socket), web search through the account's own SearXNG and Tor circuit | per-account `~/.pi/agent` |
@@ -51,6 +51,10 @@ Written new for wasisabi: `llm.nix`, `searxng.nix` (the owner's instance, on ano
 The fleet's `services.piUser` DECLARES settings.json (a read-only store symlink: on a fleet the file is policy). Here it is SEEDED, since pi writes to it in normal use and the file belongs to the owner. The trap a seed has is that settings.json names extensions by path and outlives the generation that wrote it, so a store path in it would be garbage-collected out from under it and pi would skip the extension silently. So the seed names `/etc/wasisabi/pi-extensions/<name>`, a symlink every activation repoints. `declareSettings = true` restores the fleet behaviour.
 
 The owner's wherever has no secret manager to lean on, so its token is minted at first start into `/var/lib/wherever/token` (0400, the owner's) and never exists in the store, the flake or git; `wherever-link` prints the URL with the token in the fragment, which browsers never send.
+
+**The token stays, although the fleet's telemaque runs without one.** An unauthenticated wherever is fine there because the only way in is the tailnet, and no browser that visits arbitrary pages runs on that host. Here both do. wherever sends `Access-Control-Allow-Origin: *` and does not check `Host`, so without a token any page open in a local browser could drive an agent with the owner's full access, directly or through DNS rebinding. That includes webhands' Chromium, which agents point at pages they did not choose. Loopback keeps out other machines, not other origins.
+
+**Finding it from the desktop** (`home/assistant.nix`). A new user does not know `wherever-link` exists, so the owner's home gets an "Assistant" launcher entry, `Mod+A`, a bar button (Waybar, or a `custom_button` in Noctalia's seed) and a welcome notification on the first graphical login, stamped in `~/.local/state/wasisabi/assistant-welcomed` so it shows once. All four run `wasisabi-assistant`, which calls `wherever-link` at click time, so the token never lands in the store and a rotated token needs no rebuild. It is on when the home's user is `nixos-modules.wherever.user` (`wasisabi.assistant.enable`, `.welcome`). The Noctalia button reaches only a home seeded after it exists: an existing `config.toml` belongs to the user.
 
 ## Enrolment
 

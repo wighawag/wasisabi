@@ -386,6 +386,16 @@
               actual = home.shell;
             }
             {
+              name = "the owner's home surfaces the assistant (it runs wherever for them)";
+              expected = true;
+              actual = home.assistant.enable;
+            }
+            {
+              name = "the classic bar carries the assistant button";
+              expected = "custom/assistant";
+              actual = lib.head c.home-manager.users.wighawag.programs.waybar.settings.mainBar.modules-right;
+            }
+            {
               name = "an optional app answer is honoured";
               expected = true;
               actual = home.apps.office;
@@ -472,6 +482,26 @@
                   11435
                   31415
                 ]);
+            }
+            {
+              name = "the owner's desktop reaches the assistant: launcher entry, Mod+A, welcome";
+              ok =
+                let
+                  h = d.home-manager.users.demo;
+                in
+                h.xdg.desktopEntries ? wasisabi-assistant
+                && h.wayland.windowManager.niri.settings.binds ? "Mod+A"
+                && h.systemd.user.services ? wasisabi-assistant-welcome;
+            }
+            {
+              name = "the assistant's URL (and so its token) is resolved at click time, never baked in";
+              ok =
+                let
+                  h = d.home-manager.users.demo;
+                  exec = h.xdg.desktopEntries.wasisabi-assistant.exec;
+                in
+                lib.hasSuffix "/bin/wasisabi-assistant" exec
+                && h.wayland.windowManager.niri.settings.binds."Mod+A".spawn == exec;
             }
             {
               name = "enrolment never holds up the boot";

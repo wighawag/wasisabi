@@ -34,7 +34,26 @@ let
   # Every other setting is the GUI's business, and anything written here that
   # the user later changes would look like a setting that "resets itself" if
   # this file were ever re-applied.
-  seed = pkgs.writeText "noctalia-config.toml" ''
+  #
+  # The one addition is the assistant's bar button (home/assistant.nix), when
+  # this home has an assistant. It needs the whole `end` list spelled out,
+  # since Noctalia replaces rather than extends it: this is upstream's default
+  # (src/config/config_types.h) with "assistant" in front. Being part of the
+  # seed, it reaches only a home seeded after it exists; an existing config is
+  # the user's, so add the widget there from the settings GUI if wanted.
+  assistantBar = lib.optionalString cfg.assistant.enable ''
+
+    [bar.main]
+    end = ["assistant", "media", "tray", "notifications", "clipboard", "network", "bluetooth", "volume", "brightness", "battery", "control-center", "session"]
+
+    [widget.assistant]
+    type = "custom_button"
+    glyph = "robot"
+    tooltip = "Assistant"
+    command = "wasisabi-assistant"
+  '';
+
+  seed = pkgs.writeText "noctalia-config.toml" (''
     # Seeded ONCE by wasisabi on first login, then yours. Edit freely, in this
     # file or in Noctalia's settings GUI; nothing rewrites it.
     [shell]
@@ -42,7 +61,7 @@ let
 
     [theme]
     mode = "dark"
-  '';
+  '' + assistantBar);
 in
 lib.mkIf (cfg.enable && cfg.shell == "noctalia") {
   home.packages = [ noctalia ];
