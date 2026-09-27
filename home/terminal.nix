@@ -13,6 +13,12 @@ lib.mkIf cfg.enable {
       background-opacity = 0.95;
       confirm-close-surface = false;
       copy-on-select = "clipboard";
+      # Ghostty's bash integration is loaded by the system bashrc instead
+      # (nixos-modules' interactive-shell, just before ble-attach), with the
+      # same features (cursor, path, title), since this still exports them.
+      # Injected, it made ble.sh defer its attach and every new window opened
+      # on a doubled first prompt.
+      shell-integration = "none";
     };
   };
 

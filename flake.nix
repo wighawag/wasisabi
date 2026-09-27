@@ -520,6 +520,7 @@
             "/bin/zoxide init bash"
             "/bin/atuin init bash --disable-up-arrow --disable-ai"
             "/bin/starship init bash"
+            "shell-integration/bash/ghostty.bash"
             "&& ble-attach"
           ];
           offsetIn =
@@ -532,7 +533,7 @@
           ascending = l: lib.length l < 2 || (lib.elemAt l 0 < lib.elemAt l 1 && ascending (lib.tail l));
           shellClaims = [
             {
-              name = "every step of the interactive bash init is in /etc/bashrc, in order (ble.sh, fzf, zoxide, atuin, starship, ble-attach)";
+              name = "every step of the interactive bash init is in /etc/bashrc, in order (ble.sh, fzf, zoxide, atuin, starship, ghostty's integration, ble-attach)";
               ok = lib.all (o: o >= 0) bashOffsets && ascending bashOffsets;
             }
             {
