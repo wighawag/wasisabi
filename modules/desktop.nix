@@ -8,13 +8,38 @@ let
 
   noctaliaGreeter = cfg.greetd.enable && cfg.greetd.greeter == "noctalia";
 
+  # THE ANON ACCOUNTS ARE NOT DESKTOP USERS, so the greeter does not offer
+  # them. They have no password (they are entered with `sudo anonctl use`,
+  # which changes uid without one), so picking one could only ever fail; and
+  # a desktop session could not run in one anyway, because anon accounts are
+  # refused the system bus (nixos-modules' anon-host-sockets), which a
+  # compositor needs to be handed its seat by logind.
+  #
+  # The greeter lists every passwd user with uid >= 1000 and a real shell, and
+  # has no setting to exclude one: its only filter is a hard-coded set of
+  # system names, which this extends. `--replace-fail` makes an upstream change
+  # to that line fail the build instead of silently listing them again.
+  greeterPackage =
+    if cfg.anon.enable && cfg.anon.accounts != { } then
+      pkgs.noctalia-greeter.overrideAttrs (old: {
+        postPatch = (old.postPatch or "") + ''
+          substituteInPlace src/greeter/greeter_surface.cpp --replace-fail \
+            '"greeter", "greetd", "sddm", "lightdm", "gdm", "nobody",' \
+            '"greeter", "greetd", "sddm", "lightdm", "gdm", "nobody", ${
+              lib.concatMapStrings (a: "\"${a}\", ") (lib.attrNames cfg.anon.accounts)
+            }'
+        '';
+      })
+    else
+      pkgs.noctalia-greeter;
+
   # greetd launches `noctalia-greeter-session` -- the WRAPPER, not the
   # `noctalia-greeter` binary: the wrapper starts the bundled wlroots
   # compositor and runs the greeter inside it. Pointing greetd at the bare
   # executable gives a greeter with no compositor to draw on.
   greeterCmd =
     if noctaliaGreeter
-    then lib.getExe' pkgs.noctalia-greeter "noctalia-greeter-session"
+    then lib.getExe' greeterPackage "noctalia-greeter-session"
     else "${lib.getExe pkgs.tuigreet} --time --remember --remember-session --cmd '${lib.getExe' pkgs.systemd "systemd-cat"} --identifier=niri-session ${lib.getExe' pkgs.niri "niri-session"}'";
 in
 lib.mkIf cfg.enable {
@@ -109,5 +134,5 @@ lib.mkIf cfg.enable {
   ])
   # The greeter, so `noctalia-greeter-print-greetd-config` and friends are
   # reachable for troubleshooting a login that will not come up.
-  ++ lib.optional noctaliaGreeter pkgs.noctalia-greeter;
+  ++ lib.optional noctaliaGreeter greeterPackage;
 }

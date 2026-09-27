@@ -313,7 +313,11 @@
         this machine: run `sudo anon-reconcile links`.
 
         They carry nothing of yours: no keys, no git identity, no history. Use
-        one by logging in as it, or `sudo anonctl use anon`.
+        one from a terminal with `sudo anonctl use anon`, or through its web
+        UI. They are not desktop users: they have no password, the greeter
+        does not list them, and a graphical session could not run in one,
+        since they are refused the system bus (along with the other root-side
+        services that could send traffic for them outside Tor).
 
         Runs the Tor client even if wasisabi.tor.enable is off, since it is
         their only way out (so a Tor SOCKS port on 127.0.0.1:9050 exists for
