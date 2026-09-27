@@ -73,6 +73,8 @@ let
       reboot.
 
       Things to try:
+        Super+A            the assistant, in the
+                           browser (same agent)
         pi                 an AI coding agent, on a
                            model running on this CPU
                            (the first answer waits
@@ -161,7 +163,9 @@ in
         PartOf = [ "graphical-session.target" ];
       };
       Service = {
-        ExecStart = "${terminalFor config.home-manager.users.nixos.wasisabi.terminal} -e ${welcome}";
+        # After Noctalia's own first-login intro, not on top of it: one thing
+        # at a time (the assistant's welcome notification waits the same way).
+        ExecStart = "${lib.getExe config.home-manager.users.nixos.wasisabi.afterNoctaliaIntro} ${terminalFor config.home-manager.users.nixos.wasisabi.terminal} -e ${welcome}";
         Restart = "no";
       };
       Install.WantedBy = [ "graphical-session.target" ];

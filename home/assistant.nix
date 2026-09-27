@@ -8,7 +8,8 @@
 #   - a launcher entry ("Assistant"), in fuzzel and in Noctalia's launcher
 #   - a keybind, Mod+A
 #   - a bar button (Waybar here; Noctalia's comes from its seed, see noctalia.nix)
-#   - a one-time welcome notification on the first graphical login
+#   - a welcome notification on the first graphical login, shown once and
+#     only after Noctalia's own intro is closed (after-noctalia-intro, noctalia.nix)
 #
 # All four run the same command, `wasisabi-assistant`, which asks
 # `wherever-link` for the URL AT CLICK TIME. That is the one design constraint:
@@ -213,7 +214,8 @@ in
         };
         Service = {
           Type = "simple";
-          ExecStart = lib.getExe welcome;
+          # After Noctalia's own first-login intro, not on top of it.
+          ExecStart = "${lib.getExe cfg.afterNoctaliaIntro} ${lib.getExe welcome}";
           Restart = "no";
         };
         Install.WantedBy = [ config.wayland.systemd.target ];
