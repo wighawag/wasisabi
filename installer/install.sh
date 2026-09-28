@@ -121,7 +121,9 @@ get_answer() { echo "${ANSWER[$1]:-}"; }
 apply_installer_defaults() {
   local key kind default
   while IFS=$'\t' read -r key kind default; do
-    case "$key" in extra:*) ;; *) continue ;; esac
+    # secrets:mode too: an answers file written before secrets existed gets
+    # the recommended setup, the same as pressing enter at the question.
+    case "$key" in extra:*|secrets:mode|install:mode) ;; *) continue ;; esac
     [ -z "${ANSWER[$key]+set}" ] || continue
 
     if [ "$key" = "extra:initrdKernelModules" ]; then
@@ -129,7 +131,7 @@ apply_installer_defaults() {
     fi
     [ -n "$default" ] || continue
     set_answer "$key" "$default"
-  done < <(jq -r '.groups[].items[] | select(.emit != null) | "\(.key)\t\(.kind)\t\(.default // "")"' "$WASISABI_QUESTIONS")
+  done < <(jq -r '.groups[].items[] | select(.emit != null or .key == "secrets:mode" or .key == "install:mode") | "\(.key)\t\(.kind)\t\(.default // "")"' "$WASISABI_QUESTIONS")
 }
 
 # Which answers are secrets is read from the QUESTION DEFINITIONS, not from a
@@ -137,7 +139,7 @@ apply_installer_defaults() {
 # questions appear here without editing this script, so a new password-kind
 # question must not need someone to remember to add it to a `case` before it
 # stops being written to a world-readable file on the installed machine.
-mapfile -t SECRET_KEYS < <(jq -r '.groups[].items[] | select(.kind == "password") | .key' "$WASISABI_QUESTIONS")
+mapfile -t SECRET_KEYS < <(jq -r '.groups[].items[] | select(.kind == "password" or .kind == "agekey") | .key' "$WASISABI_QUESTIONS")
 
 is_secret() {
   local key="$1" secret
@@ -206,6 +208,24 @@ ask_item() {
       set_answer "$key" "$a"
       [ "$xtrace" = 1 ] && set -x
       ;;
+    agekey)
+      # Once, hidden, and checked on the spot: a mistyped key is only
+      # otherwise discovered when the installed machine cannot decrypt its
+      # own password.
+      local k optional
+      optional=$(jq -r '.optional // false' <<<"$item")
+      local xtrace=0
+      case "$-" in *x*) xtrace=1; set +x ;; esac
+      while true; do
+        k=$(gum input --password --placeholder "AGE-SECRET-KEY-1...")
+        k=$(tr -d '[:space:]' <<<"$k")
+        valid_age_key "$k" && break
+        [ -z "$k" ] && [ "$optional" = true ] && break
+        warn "That is not an age secret key (one line, starting AGE-SECRET-KEY-1). Again."
+      done
+      set_answer "$key" "$k"
+      [ "$xtrace" = 1 ] && set -x
+      ;;
     bool)
       local value
       if gum confirm --default="$([ "$default" = "true" ] && echo true || echo false)" "Enable?"; then
@@ -233,6 +253,10 @@ ask_item() {
       die "question '$key' has kind '$kind', which this installer does not know how to ask."
       ;;
   esac
+}
+
+valid_age_key() {
+  [[ "$1" =~ ^AGE-SECRET-KEY-1[0-9A-Z]{58}$ ]] && age-keygen -y <(printf '%s\n' "$1") >/dev/null 2>&1
 }
 
 # ── disks ─────────────────────────────────────────────────────────────────
@@ -361,6 +385,279 @@ detect_drm_modules() {
   printf '%s\n' "${out[@]:-}" | sort -u | tr '\n' ' ' | sed 's/ *$//'
 }
 
+# ── restore: read the answers out of an existing config repo ───────────────
+
+# A restore installs a config that already exists, so identity, keyboard,
+# secrets, disks and every option come FROM the repo. The rule throughout:
+# follow what the config DECLARES, and fall back to the installer's own way
+# (its disk layouts, its key locations, asking for a password) only where the
+# config says nothing. That is what lets one restore serve both a repo the
+# installer made and a fleet repo in which this machine is one host of many.
+#
+# Everything here runs before any disk is touched: a repo that will not clone
+# or evaluate, a key that does not open its secrets, or a config whose disks
+# the installer cannot account for, stops the install with nothing
+# partitioned.
+install_mode=fresh
+restore_ready=0
+RESTORE_CLONE="" RESTORE_HOST="" RESTORE_REPO_PATH="" RESTORE_KEYFILE_PATH=""
+RESTORE_PW_FROM_SECRETS=0 RESTORE_PW_DECLARED=0 RESTORE_DISKO=0 RESTORE_TEMPLATE_SECRETS=0
+RESTORE_DISKS=()
+
+restore_eval_in() {
+  local src="$1" attr="$2" fn="$3"
+  local -a flags=(--extra-experimental-features "nix-command flakes" --json --no-write-lock-file)
+  [ "$WASISABI_OFFLINE" = 1 ] && flags+=(--offline)
+  nix eval "${flags[@]}" "path:$src#$attr" --apply "$fn"
+}
+restore_eval() { restore_eval_in "$RESTORE_CLONE" "$@"; }
+
+# Decrypt one sops file (or one value in it) with the key given for the
+# restore, to stdout.
+restore_decrypt() {
+  local file="$1" format="$2" extract="${3:-}"
+  local -a args=(decrypt --input-type "$format")
+  [ "$format" = binary ] && args+=(--output-type binary)
+  [ -n "$extract" ] && args+=(--extract "$extract")
+  SOPS_AGE_KEY_FILE="$WORK/age.key" sops "${args[@]}" "$file"
+}
+
+restore_prepare() {
+  restore_ready=1
+  local source host facts key ssh_key
+
+  # FETCHING OVER SSH. A private repo, or a public one pinned as git+ssh
+  # (a fleet flake often pins its inputs that way), needs a key the ISO
+  # does not have. One key covers both: git uses GIT_SSH_COMMAND, and so does
+  # nix's git fetcher for flake inputs (checked: a sentinel command in it is
+  # what `nix flake metadata git+ssh://...` runs). The key stays in $WORK, on
+  # tmpfs, and is never copied to the new disk. accept-new, because the
+  # installer has never seen github.com's host key and has nobody to ask.
+  ssh_key=$(get_answer "restore:sshKeyFile")
+  if [ -n "$ssh_key" ]; then
+    [ -f "$ssh_key" ] || die "restore:sshKeyFile '$ssh_key' does not exist."
+    install -m 0600 "$ssh_key" "$WORK/ssh_key"
+    : > "$WORK/known_hosts"
+    export GIT_SSH_COMMAND="ssh -i $WORK/ssh_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=$WORK/known_hosts"
+  fi
+
+  source=$(get_answer "restore:source")
+  [ -n "$source" ] || die "a restore needs restore:source, the repo to restore from."
+
+  heading "Fetching your config"
+  RESTORE_CLONE="$WORK/restore"
+  # safe.directory='*': git refuses to clone a LOCAL repo owned by another
+  # user, which is every repo on a USB stick formatted with the owner's uid
+  # (and a store path, in the VM test). The source is the one the person at
+  # the keyboard named, and cloning only reads it.
+  git -c safe.directory='*' clone -q -- "$source" "$RESTORE_CLONE" \
+    || die "could not clone '$source'. Nothing was touched. (Network up? Private repo: give restore:sshKeyFile, or a token in an https URL.)"
+  [ -f "$RESTORE_CLONE/flake.nix" ] || die "'$source' has no flake.nix at its top. Nothing was touched."
+  [ -f "$RESTORE_CLONE/flake.lock" ] || warn "The repo has no flake.lock, so its inputs resolve to whatever is current today."
+
+  local -a hosts
+  mapfile -t hosts < <(restore_eval nixosConfigurations builtins.attrNames | jq -r '.[]') \
+    || die "could not evaluate the repo's flake. Nothing was touched."
+  [ "${#hosts[@]}" -gt 0 ] || die "the repo defines no nixosConfigurations."
+
+  host=$(get_answer "restore:host")
+  if [ -z "$host" ]; then
+    if [ "${#hosts[@]}" = 1 ]; then
+      host="${hosts[0]}"
+    elif [ -z "$ANSWERS_IN" ]; then
+      bold "The repo has several machines. Which one is this?"
+      host=$(gum choose "${hosts[@]}")
+    else
+      die "the repo has several machines (${hosts[*]}); set restore:host."
+    fi
+  fi
+  printf '%s\n' "${hosts[@]}" | grep -qxF -- "$host" \
+    || die "the repo has no machine '$host' (it has: ${hosts[*]})."
+  RESTORE_HOST="$host"
+
+  heading "Reading $host"
+  note "Evaluating the config (a minute, and it may download the sources it pins)."
+  # Single-quoted on purpose: ${user} and friends are NIX interpolation.
+  # shellcheck disable=SC2016
+  facts=$(restore_eval "nixosConfigurations.$host.config" 'c: let
+    user = c.wasisabi.user or "";
+    u = c.users.users.${user} or { };
+    secrets = builtins.attrValues (c.sops.secrets or { });
+    # tryEval, not `or`: sops.defaultSopsFile has NO default, so a config that
+    # never sets it (every secret naming its own file, as a fleet does)
+    # throws on access rather than lacking the attribute.
+    try = x: let r = builtins.tryEval x; in if r.success then r.value else null;
+    defaultFile = try (toString (c.sops.defaultSopsFile or null));
+    firstFile = if secrets == [ ] then null else try (toString (builtins.head secrets).sopsFile);
+    first = if secrets == [ ] then null else builtins.head secrets;
+  in {
+    inherit user;
+    hostName = c.networking.hostName;
+    repoPath = if c.environment.etc ? nixos then toString c.environment.etc.nixos.source else "";
+    layout = c.services.xserver.xkb.layout;
+    variant = c.services.xserver.xkb.variant;
+    keyFile = c.sops.age.keyFile or null;
+    templateSecrets = (c.wasisabi.secrets.sopsFile or null) != null;
+    # One file the given key must open: the default secrets file, else the
+    # first declared secret. Proves the key before the disk is touched.
+    probeFile = if defaultFile != null && defaultFile != "" then defaultFile
+      else if firstFile != null then firstFile else "";
+    probeFormat = if defaultFile != null && defaultFile != "" then (c.sops.defaultSopsFormat or "yaml")
+      else if first != null then first.format else "yaml";
+    passwordFromSecrets = (c.wasisabi.secrets.sopsFile or null) != null
+      && (c.wasisabi.secrets.ownerPassword or false) && user != "";
+    passwordDeclared = builtins.any (a: (u.${a} or null) != null)
+      [ "hashedPasswordFile" "hashedPassword" "password" "initialHashedPassword" "initialPassword" ];
+    disks = map (d: d.device) (builtins.attrValues (c.disko.devices.disk or { }));
+    files = builtins.mapAttrs (_: f: {
+      sopsFile = toString f.sopsFile;
+      inherit (f) format mode;
+      extract = if f.extract == null then "" else f.extract;
+    }) (c.wasisabi.restore.files or { });
+  }') || die "could not evaluate nixosConfigurations.$host. Nothing was touched."
+
+  # The whole system, evaluated, so its assertions run NOW. A config that
+  # fails one (a module the new pins reject, a check on a name) otherwise
+  # fails at the build step, after this disk has been wiped. This only
+  # evaluates; nothing is built or downloaded beyond the sources.
+  note "Checking that it evaluates as a whole system."
+  restore_eval "nixosConfigurations.$host.config.system.build.toplevel.drvPath" 'x: x' >/dev/null \
+    || die "'$host' does not evaluate (the error is above). Nothing was touched."
+
+  local user
+  user=$(jq -r .user <<<"$facts")
+  [ -n "$user" ] || die "'$host' does not name its owner (wasisabi.user), so there is no account to restore the repo into."
+  set_answer "identity:hostname" "$(jq -r .hostName <<<"$facts")"
+  set_answer "identity:username" "$user"
+  set_answer "system:keyboard.layout" "$(jq -r .layout <<<"$facts")"
+  set_answer "system:keyboard.variant" "$(jq -r .variant <<<"$facts")"
+
+  # WHERE THE REPO GOES: as asked, else where the config says it lives (the
+  # /etc/nixos link a wasisabi config declares), else the owner's ~/nixos. A
+  # fleet repo usually declares no link, and belongs wherever its owner keeps
+  # checkouts, which only they know.
+  RESTORE_REPO_PATH=$(get_answer "restore:repoPath")
+  if [ -z "$RESTORE_REPO_PATH" ]; then
+    RESTORE_REPO_PATH=$(jq -r .repoPath <<<"$facts")
+    case "$RESTORE_REPO_PATH" in
+      /nix/store/*|"") RESTORE_REPO_PATH="/home/$user/nixos" ;;
+      /*) ;;
+      *) RESTORE_REPO_PATH="/home/$user/nixos" ;;
+    esac
+  fi
+  case "$RESTORE_REPO_PATH" in
+    /*) ;;
+    *) die "restore:repoPath must be an absolute path (got '$RESTORE_REPO_PATH')." ;;
+  esac
+  case "/$RESTORE_REPO_PATH/" in
+    */../*|*/./*) die "restore:repoPath must not contain . or .. components." ;;
+  esac
+  RESTORE_KEYFILE_PATH=$(jq -r '.keyFile // ""' <<<"$facts")
+  [ "$(jq -r .templateSecrets <<<"$facts")" = true ] && RESTORE_TEMPLATE_SECRETS=1
+
+  # THE DISKS. A config that declares them (disko) is partitioned by that
+  # declaration: partitioning it any other way leaves a system whose
+  # fileSystems name partitions that do not exist, which evaluates, builds,
+  # installs, and does not boot. A config that does not is partitioned by the
+  # installer's own layouts ONLY IF its root filesystem demonstrably comes
+  # from ./hardware-configuration.nix, the file the restore regenerates.
+  # Anything else is refused.
+  mapfile -t RESTORE_DISKS < <(jq -r '.disks[]' <<<"$facts")
+  if [ "${#RESTORE_DISKS[@]}" -gt 0 ]; then
+    RESTORE_DISKO=1
+    set_answer "restore:disko" "true"
+    set_answer "disk:layout" "disko"
+    local d
+    for d in "${RESTORE_DISKS[@]}"; do
+      [ -b "$d" ] || die "the config partitions $d, which this machine does not have. Change the disk device in the repo, push, and restore again. Nothing was touched."
+    done
+    note "The config declares its own disks (disko): ${RESTORE_DISKS[*]}. They will be partitioned as it says."
+  else
+    # Probe: swap in a hardware file naming a disk that cannot exist, and see
+    # whether the evaluated root filesystem is that disk.
+    local probe="$WORK/probe" probe_dev="/dev/disk/by-uuid/wasisabi-restore-probe"
+    cp -a "$RESTORE_CLONE" "$probe"
+    cat > "$probe/hardware-configuration.nix" <<EOF
+{ lib, ... }: {
+  fileSystems."/" = { device = "$probe_dev"; fsType = "ext4"; };
+  fileSystems."/boot" = { device = "/dev/disk/by-uuid/PROBE-BOOT"; fsType = "vfat"; };
+  nixpkgs.hostPlatform = lib.mkDefault "x86_64-linux";
+}
+EOF
+    if [ "$(restore_eval_in "$probe" "nixosConfigurations.$host.config.fileSystems" 'f: f."/".device' 2>/dev/null | jq -r .)" != "$probe_dev" ]; then
+      die "'$host' takes its root filesystem neither from ./hardware-configuration.nix at the top of the repo nor from disko, so the installer cannot know how to partition for it. Nothing was touched."
+    fi
+    rm -rf "$probe"
+  fi
+
+  # THE KEY, proved against the repo's own secrets now rather than
+  # discovered at the first boot, when it would be a machine nobody can log
+  # into.
+  local probe_file probe_format nfiles
+  key=$(get_answer "restore:ageKey")
+  probe_file=$(jq -r .probeFile <<<"$facts")
+  probe_format=$(jq -r .probeFormat <<<"$facts")
+  nfiles=$(jq '.files | length' <<<"$facts")
+  if [ -n "$key" ]; then
+    valid_age_key "$key" || die "restore:ageKey is not a valid age secret key."
+    (umask 077; printf '%s\n' "$key" > "$WORK/age.key")
+  fi
+  if [ -n "$probe_file" ] || [ "$nfiles" -gt 0 ]; then
+    [ -s "$WORK/age.key" ] || die "the config has encrypted secrets, and restoring it needs the age key that opens them."
+  fi
+  if [ -n "$probe_file" ]; then
+    restore_decrypt "$probe_file" "$probe_format" >/dev/null 2>&1 \
+      || die "that key does not open this repo's secrets ($probe_file). Nothing was touched."
+    note "Your key opens the repo's secrets."
+  fi
+
+  # FILES TO PLACE BEFORE THE FIRST BOOT (wasisabi.restore.files), each
+  # decrypted now, which both proves the key opens it and means nothing can
+  # fail between partitioning and placing them. Kept on tmpfs until then.
+  : > "$WORK/files.tsv"
+  if [ "$nfiles" -gt 0 ]; then
+    mkdir -m 0700 "$WORK/files"
+    local i=0 path file format extract mode
+    # \x1f, not a tab: tab is IFS WHITESPACE, so `read` merges consecutive
+    # tabs and an empty field (extract, usually) silently shifts the rest.
+    while IFS=$'\x1f' read -r path file format extract mode; do
+      case "$path" in
+        /*) ;;
+        *) die "wasisabi.restore.files: '$path' is not an absolute path." ;;
+      esac
+      case "/$path/" in */../*) die "wasisabi.restore.files: '$path' contains '..'." ;; esac
+      (umask 077; restore_decrypt "$file" "$format" "$extract" > "$WORK/files/$i") \
+        || die "the key does not open $file, which the config wants placed at $path. Nothing was touched."
+      printf '%s\t%s\t%s\n' "$i" "$path" "$mode" >> "$WORK/files.tsv"
+      i=$((i + 1))
+    done < <(jq -r '.files | to_entries[] | [.key, .value.sopsFile, .value.format, .value.extract, .value.mode] | join("\u001f")' <<<"$facts")
+    note "$nfiles file(s) from the repo will be placed before the first boot: $(cut -f2 "$WORK/files.tsv" | tr '\n' ' ')"
+  fi
+
+  # THE PASSWORD: from the repo when it can be, asked only when it cannot.
+  if [ "$(jq -r .passwordFromSecrets <<<"$facts")" = true ]; then
+    RESTORE_PW_FROM_SECRETS=1
+    # What activation will put in /etc/shadow, read now so the install can
+    # check afterwards that it did.
+    restore_decrypt "$probe_file" yaml '["owner-password"]' > "$WORK/password.hash" 2>/dev/null \
+      || die "the repo's secrets have no owner-password, which its config says they do."
+    note "Your password comes from the repo, as before."
+  elif [ "$(jq -r .passwordDeclared <<<"$facts")" = true ]; then
+    # The config sets it its own way (its own sops secret, a hash). Trust
+    # that; setting another one here would only be overwritten, or worse,
+    # override what the config meant.
+    RESTORE_PW_DECLARED=1
+    note "The config declares $user's password; it is set when the system is activated."
+  elif [ -z "$(get_answer "identity:password")" ]; then
+    [ -z "$ANSWERS_IN" ] || die "the repo does not hold the password; add identity:password to the answers."
+    ask_item "$(q -c '.groups[].items[] | select(.key == "identity:password")')"
+  fi
+
+  # The passphrase for a LUKS layout is typed next, on the keyboard the
+  # restored machine's initrd will present.
+  apply_keymap
+}
+
 # ── run ───────────────────────────────────────────────────────────────────
 
 if [ -n "$ANSWERS_IN" ]; then
@@ -374,14 +671,25 @@ else
     "an opinionated, libre-only Wayland desktop" \
     "" \
     "This asks for your machine's identity, then for wasisabi's own" \
-    "options, and writes an ordinary NixOS flake to /etc/nixos that" \
-    "you own and can edit or abandon afterwards."
+    "options, and writes an ordinary NixOS flake to ~/nixos: a git" \
+    "repo you own, that can rebuild this machine, and that you can" \
+    "edit, push, or abandon afterwards."
 
   reviewed=0
   ngroups=$(q '.groups | length')
   for gi in $(seq 0 $((ngroups - 1))); do
     title=$(q ".groups[$gi].title")
     essential=$(q ".groups[$gi].essential // false")
+
+    # A restore reads everything but the disk out of the repo.
+    if [ "$(get_answer "install:mode")" = restore ]; then
+      [ "$restore_ready" = 1 ] || restore_prepare
+      [ "$essential" = true ] || break
+      skip_key=$(q -r ".groups[$gi].skipWhen.key // \"\"")
+      if [ -n "$skip_key" ] && [ "$(get_answer "$skip_key")" = "$(q -r ".groups[$gi].skipWhen.equals")" ]; then
+        continue
+      fi
+    fi
 
     # Identity and disks are not optional. wasisabi's own options are, and
     # being asked twenty questions you have no opinion about is a bad first
@@ -423,6 +731,13 @@ fi
 # documented default, explicitly, rather than falling through to NixOS's.
 apply_installer_defaults
 
+install_mode=$(get_answer "install:mode")
+case "$install_mode" in fresh|restore) ;; *) die "install:mode must be fresh or restore (got '$install_mode')." ;; esac
+if [ "$install_mode" = restore ]; then
+  [ -z "$OUT_ONLY" ] || die "--out-only writes a new flake; a restore has one already."
+  [ "$restore_ready" = 1 ] || restore_prepare
+fi
+
 # ── validate ──────────────────────────────────────────────────────────────
 
 hostname=$(get_answer "identity:hostname")
@@ -446,7 +761,8 @@ esac
 # An empty password is not a password. The interactive path already refuses
 # one; an answers file that omits the key must not quietly produce a machine
 # whose only account cannot be logged into (or worse, can be without one).
-if [ -z "$OUT_ONLY" ] && [ -z "$(get_answer "identity:password")" ]; then
+if [ -z "$OUT_ONLY" ] && [ "$RESTORE_PW_FROM_SECRETS" = 0 ] && [ "$RESTORE_PW_DECLARED" = 0 ] \
+  && [ -z "$(get_answer "identity:password")" ]; then
   die "no password was given for '$username'. Add identity:password to the answers file."
 fi
 
@@ -455,13 +771,54 @@ fi
 # The encrypted case, checked before any disk is touched: a passphrase typed
 # on a console whose layout could not be set will not be the passphrase the
 # initrd asks for, and the result is a machine nobody can unlock.
-if [ -z "$OUT_ONLY" ] && [ "$layout" = "luks" ] && [ "$keymap_failed" = 1 ]; then
+# A disko config may well encrypt its disk too, and nothing here can tell
+# without reading its layout, so it gets the same refusal.
+if [ -z "$OUT_ONLY" ] && { [ "$layout" = "luks" ] || [ "$layout" = "disko" ]; } && [ "$keymap_failed" = 1 ]; then
   die "the console could not be switched to the '$(get_answer "system:keyboard.layout")' layout, so an encrypted install would take its passphrase on the wrong keyboard. Nothing was touched."
 fi
 
 if [ -z "$OUT_ONLY" ]; then
   [ "$(id -u)" = 0 ] || die "installing needs root. Try: sudo wasisabi-install"
   [ -d /sys/firmware/efi ] || die "this machine did not boot in UEFI mode. wasisabi's shipped layouts are UEFI-only; use the manual layout for BIOS."
+fi
+
+# ── secrets: settled before any disk is touched ──────────────────────────
+
+# The age key is obtained HERE, before the summary, so that someone who is
+# shown a new key and decides they cannot save it right now can still abort
+# with nothing partitioned.
+if [ "$install_mode" = restore ]; then
+  # The repo's secrets already exist and the key was checked against them
+  # in restore_prepare.
+  secrets_mode=restore
+else
+  secrets_mode=$(get_answer "secrets:mode")
+  case "$secrets_mode" in generate|import|skip) ;; *) die "secrets:mode must be generate, import or skip (got '$secrets_mode')." ;; esac
+fi
+if [ -n "$OUT_ONLY" ]; then
+  # --out-only writes the flake as the template renders it; secrets are a
+  # step on the machine, run with `wasisabi-secrets init` in the result.
+  secrets_mode=skip
+fi
+
+if [ "$secrets_mode" = import ]; then
+  valid_age_key "$(get_answer "secrets:ageKey")" || die "secrets:ageKey is not a valid age secret key."
+  (umask 077; printf '%s\n' "$(get_answer "secrets:ageKey")" > "$WORK/age.key")
+elif [ "$secrets_mode" = generate ]; then
+  keygen_args=(keygen --out "$WORK/age.key")
+  if [ -n "$ANSWERS_IN" ] || [ "$ASSUME_YES" = 1 ]; then keygen_args+=(--yes); fi
+  heading "Your age key"
+  wasisabi-secrets "${keygen_args[@]}"
+fi
+
+if [ "$secrets_mode" = generate ] || [ "$secrets_mode" = import ]; then
+  # The password's hash, which is what goes in the encrypted file. Computed
+  # now, while the password is in memory anyway, and kept on tmpfs.
+  xtrace=0
+  case "$-" in *x*) xtrace=1; set +x ;; esac
+  (umask 077; printf '%s' "$(get_answer "identity:password")" | mkpasswd -m yescrypt --stdin > "$WORK/password.hash")
+  [ "$xtrace" = 1 ] && set -x
+  [ -s "$WORK/password.hash" ] || die "could not hash the password."
 fi
 
 # ── emit the flake ────────────────────────────────────────────────────────
@@ -481,14 +838,26 @@ if [ -n "$OUT_ONLY" ]; then
   exit 0
 fi
 
+# Where the repo goes on the target, and which of its machines to build.
+if [ "$install_mode" = restore ]; then
+  REPO_PATH="$RESTORE_REPO_PATH"
+  FLAKE_ATTR="$RESTORE_HOST"
+else
+  REPO_PATH="/home/$username/nixos"
+  FLAKE_ATTR="$hostname"
+fi
+
 # ── summary and the point of no return ────────────────────────────────────
 
 heading "Summary"
 printf '  %-16s %s\n' \
   "hostname" "$hostname" \
   "user" "$username" \
-  "disk" "${device:-(already mounted at $TARGET)}" \
+  "disk" "$(if [ "$layout" = disko ]; then echo "${RESTORE_DISKS[*]} (as the config declares)"; else echo "${device:-(already mounted at $TARGET)}"; fi)" \
   "layout" "$layout" \
+  "installing" "$([ "$install_mode" = restore ] && echo "'$RESTORE_HOST' from $(get_answer "restore:source")" || echo "a new machine")" \
+  "config repo" "$REPO_PATH (linked from /etc/nixos)" \
+  "secrets" "$(case "$secrets_mode" in generate) echo "sops, with the new key" ;; import) echo "sops, with your key" ;; restore) [ -s "$WORK/age.key" ] && echo "the repo's, with your key" || echo "none in the repo" ;; *) echo "not set up (wasisabi-secrets init, later)" ;; esac)" \
   "packages from" "$([ "$WASISABI_OFFLINE" = 1 ] && echo "this medium, offline" || echo "cache.nixos.org, over the network")"
 echo
 # Only true when the options were NOT reviewed. Walking through them records
@@ -508,6 +877,21 @@ fi
 if [ "$layout" = "manual" ]; then
   mountpoint -q "$TARGET" || die "layout is 'manual' but nothing is mounted at $TARGET."
   note "Manual layout: using the filesystems already mounted at $TARGET."
+elif [ "$layout" = "disko" ]; then
+  # The config's own disk declaration, through disko's --flake, which reads
+  # nixosConfigurations.<host>.config.disko. Every declared disk gets the
+  # same safety checks and the same typed confirmation as the installer's
+  # own layouts. A LUKS passphrase, if the layout has one, is asked for by
+  # disko itself unless the config names a file for it.
+  device="${RESTORE_DISKS[*]}"
+  for d in "${RESTORE_DISKS[@]}"; do
+    check_device_safe "$d"
+    confirm_destruction "$d"
+  done
+  heading "Partitioning as the config declares"
+  DISK_TOUCHED=1
+  disko --mode "destroy,format,mount" --yes-wipe-all-disks \
+    --root-mountpoint "$TARGET" --flake "$RESTORE_CLONE#$RESTORE_HOST"
 else
   check_device_safe "$device"
   confirm_destruction "$device"
@@ -538,53 +922,119 @@ fi
 
 mountpoint -q "$TARGET" || die "nothing is mounted at $TARGET after partitioning."
 
-# ── hardware configuration ────────────────────────────────────────────────
+# ── the config repo ───────────────────────────────────────────────────────
+
+# The flake lives in the owner's home, as a git repo they own, and
+# /etc/nixos is a link to it that the flake itself declares
+# (template/configuration.nix). Nothing is written to $TARGET/etc/nixos: a
+# real directory there would stop that link from being created.
+REPO="$TARGET$REPO_PATH"
+mkdir -p "$(dirname "$REPO")"
 
 heading "Detecting hardware"
-nixos-generate-config --root "$TARGET"
-# Its configuration.nix is a scaffold we are about to replace with the real
-# one; hardware-configuration.nix is the part worth keeping.
-rm -f "$TARGET/etc/nixos/configuration.nix"
+# Printed rather than written, so no /etc/nixos directory appears and no
+# scaffold configuration.nix has to be thrown away.
+nixos-generate-config --root "$TARGET" --show-hardware-config > "$WORK/hardware-configuration.nix"
 
-# ── write the flake ───────────────────────────────────────────────────────
+if [ "$install_mode" = restore ]; then
+  # The repo as it is, in the place its config says it lives, with ONE
+  # change: the hardware file, because new partitions have new UUIDs and the
+  # old file names disks that no longer exist. Committed, so the tree is
+  # clean, and so the owner can see and push what the reinstall changed.
+  heading "Restoring $REPO_PATH"
+  cp -a "$RESTORE_CLONE" "$REPO"
+  # A disko config describes its disks itself and has no hardware file to
+  # regenerate: the repo goes back exactly as it was.
+  if [ "$RESTORE_DISKO" = 0 ]; then
+    install -m 0644 "$WORK/hardware-configuration.nix" "$REPO/hardware-configuration.nix"
+    git -C "$REPO" add hardware-configuration.nix
+  fi
+  if ! git -C "$REPO" diff --cached --quiet; then
+    git -C "$REPO" \
+      -c user.name=wasisabi-install -c user.email=installer@localhost \
+      commit -q -m "Reinstall $RESTORE_HOST on new disks
 
-heading "Writing /etc/nixos"
-bash "$WASISABI_EMIT" \
-  --questions "$WASISABI_QUESTIONS" --answers "$WORK/answers.json" \
-  --template "$WASISABI_TEMPLATE" --out "$WORK/flake" \
-  --state-version "$WASISABI_STATE_VERSION" --wasisabi-url "$WASISABI_URL"
+hardware-configuration.nix regenerated by wasisabi-install for the disks this
+reinstall partitioned (new UUIDs). Nothing else in the repo was changed."
+  fi
+  # THE KEY GOES ONLY WHERE THE CONFIG READS IT. A config set up by
+  # wasisabi-secrets uses one key for owner and machine, so it gets both
+  # copies. Anything else gets the machine's copy only if the config names a
+  # key file (sops.age.keyFile), and never the owner's: for a fleet repo the
+  # key that opens everything is the ADMIN key, and leaving it on one laptop
+  # is a decision, not a side effect of reinstalling it.
+  if [ -s "$WORK/age.key" ]; then
+    key_args=(install-key --root "$TARGET" --user "$username" --key-file "$WORK/age.key" --yes)
+    [ -z "$RESTORE_KEYFILE_PATH" ] || key_args+=(--machine-key "$RESTORE_KEYFILE_PATH")
+    if [ "$RESTORE_TEMPLATE_SECRETS" = 1 ]; then
+      heading "Putting your age key in place"
+      wasisabi-secrets "${key_args[@]}"
+    elif [ -n "$RESTORE_KEYFILE_PATH" ]; then
+      heading "Putting the machine's age key in place"
+      wasisabi-secrets "${key_args[@]}" --no-user-copy
+    else
+      note "Your age key was used for this restore only; the config does not read one from disk, so it was not copied there."
+    fi
+  fi
 
-install -m 0644 "$WASISABI_LOCK" "$WORK/flake/flake.lock"
-install -m 0644 \
-  "$WORK/flake/flake.nix" \
-  "$WORK/flake/configuration.nix" \
-  "$WORK/flake/flake.lock" \
-  -t "$TARGET/etc/nixos/"
+  # The files the config asked for (wasisabi.restore.files), decrypted
+  # before partitioning, placed now, before activation first needs them.
+  while IFS=$'\t' read -r idx path mode; do
+    install -D -m "$mode" -o root -g root "$WORK/files/$idx" "$TARGET$path"
+    note "Placed $path (from the repo, mode $mode)."
+  done < "$WORK/files.tsv"
+else
+  heading "Writing ~/nixos"
+  bash "$WASISABI_EMIT" \
+    --questions "$WASISABI_QUESTIONS" --answers "$WORK/answers.json" \
+    --template "$WASISABI_TEMPLATE" --out "$WORK/flake" \
+    --state-version "$WASISABI_STATE_VERSION" --wasisabi-url "$WASISABI_URL"
 
-# The pinned lock is the difference between installing what was tested and
-# installing whatever is current. If it did not land, stop now rather than
-# letting nix quietly resolve something else.
-[ -f "$TARGET/etc/nixos/flake.lock" ] || die "internal: the pinned flake.lock did not reach $TARGET/etc/nixos."
+  install -m 0644 "$WASISABI_LOCK" "$WORK/flake/flake.lock"
+  install -m 0644 \
+    "$WORK/flake/flake.nix" \
+    "$WORK/flake/configuration.nix" \
+    "$WORK/flake/.gitignore" \
+    "$WORK/flake/flake.lock" \
+    "$WORK/hardware-configuration.nix" \
+    -t "$REPO/"
 
-# A record of what was answered. Nothing reads it back: it is there so that
-# "how was this machine installed" has an answer a year from now.
-jq '.' "$WORK/answers.json" > "$TARGET/etc/nixos/installer-answers.json"
-chmod 0644 "$TARGET/etc/nixos/installer-answers.json"
+  # The pinned lock is the difference between installing what was tested and
+  # installing whatever is current. If it did not land, stop now rather than
+  # letting nix quietly resolve something else.
+  [ -f "$REPO/flake.lock" ] || die "internal: the pinned flake.lock did not reach $REPO."
 
-# git first, and committed, so that the flake is a clean tree from the moment
-# it exists -- and because an uncommitted git repo would hide these very files
-# from nix, which does not see untracked files in a git tree.
-if [ ! -d "$TARGET/etc/nixos/.git" ]; then
-  git -C "$TARGET/etc/nixos" init -q -b main
-  git -C "$TARGET/etc/nixos" add -A
-  git -C "$TARGET/etc/nixos" \
-    -c user.name=wasisabi-install -c user.email=installer@localhost \
-    commit -q -m "Install $hostname with wasisabi
+  # A record of what was answered. Nothing reads it back: it is there so that
+  # "how was this machine installed" has an answer a year from now. Secrets are
+  # never in it (answers_json drops them).
+  jq '.' "$WORK/answers.json" > "$REPO/installer-answers.json"
+  chmod 0644 "$REPO/installer-answers.json"
 
-Generated by wasisabi-install from template/ plus the answers in
-installer-answers.json. This is an ordinary NixOS flake: edit it, rebuild with
-  sudo nixos-rebuild switch --flake /etc/nixos#$hostname
-or walk away from wasisabi entirely by removing the module imports."
+  # git first, and committed, so that the flake is a clean tree from the moment
+  # it exists -- and because an uncommitted git repo would hide these very files
+  # from nix, which does not see untracked files in a git tree.
+  if [ ! -d "$REPO/.git" ]; then
+    git -C "$REPO" init -q -b main
+    git -C "$REPO" add -A
+    git -C "$REPO" \
+      -c user.name=wasisabi-install -c user.email=installer@localhost \
+      commit -q -m "Install $hostname with wasisabi
+
+  Generated by wasisabi-install from template/ plus the answers in
+  installer-answers.json. This is an ordinary NixOS flake that rebuilds this
+  machine: edit it, then
+    sudo nixos-rebuild switch
+  (/etc/nixos links here), or walk away from wasisabi entirely by removing the
+  module imports."
+  fi
+
+  # The second commit: sops, with the password's hash as the first secret.
+  # Same tool, same code the owner runs later by hand if they skipped this.
+  if [ "$secrets_mode" = generate ] || [ "$secrets_mode" = import ]; then
+    heading "Setting up secrets"
+    wasisabi-secrets init --repo "$REPO" --root "$TARGET" --user "$username" \
+      --key-file "$WORK/age.key" --password-hash-file "$WORK/password.hash" --yes
+  fi
 fi
 
 # ── install ───────────────────────────────────────────────────────────────
@@ -610,14 +1060,14 @@ note "This is the long part. It is building your actual configuration, not unpac
 if [ "$WASISABI_OFFLINE" = 1 ]; then
   note "Building from this medium, with the network explicitly disabled."
   if ! toplevel=$(nix build --offline --no-link --print-out-paths --no-update-lock-file \
-      "path:$TARGET/etc/nixos#nixosConfigurations.$hostname.config.system.build.toplevel"); then
+      "path:$REPO#nixosConfigurations.$FLAKE_ATTR.config.system.build.toplevel"); then
     warn "Could not build the system from this medium."
     toplevel=""
   fi
   install_args=(--root "$TARGET" --system "$toplevel" --no-root-password)
   [ -n "$toplevel" ] || install_args=()
 else
-  install_args=(--root "$TARGET" --flake "path:$TARGET/etc/nixos#$hostname" --no-root-password --no-update-lock-file)
+  install_args=(--root "$TARGET" --flake "path:$REPO#$FLAKE_ATTR" --no-root-password --no-update-lock-file)
 fi
 
 # RETRY THE NETWORKED BUILD, because what fails it most is the network. A
@@ -650,12 +1100,12 @@ if [ "$install_ok" != 1 ]; then
   # and "requires lock file changes" does not say WHICH changes. Ask nix, on a
   # scratch copy so nothing on the target is modified, and show the diff.
   warn "nixos-install failed. Checking whether the pinned lock is the reason."
-  if cp -r "$TARGET/etc/nixos" "$WORK/lockdiag" 2>/dev/null; then
+  if cp -r "$REPO" "$WORK/lockdiag" 2>/dev/null; then
     chmod -R u+w "$WORK/lockdiag"
     rm -rf "$WORK/lockdiag/.git"
     if (cd "$WORK/lockdiag" && nix flake lock --extra-experimental-features 'nix-command flakes' 2>&1 | head -20); then
       echo "--- what nix wanted to change in flake.lock ---"
-      diff <(jq -S . "$TARGET/etc/nixos/flake.lock") <(jq -S . "$WORK/lockdiag/flake.lock") | head -60 || true
+      diff <(jq -S . "$REPO/flake.lock") <(jq -S . "$WORK/lockdiag/flake.lock") | head -60 || true
       echo "--- end ---"
     fi
   fi
@@ -665,8 +1115,13 @@ fi
 # ── password ──────────────────────────────────────────────────────────────
 
 heading "Setting the password"
-# Straight into the target's /etc/shadow, so no password material is written
-# into the flake, which therefore stays publishable.
+# With secrets, activation already set it from the encrypted file (NixOS
+# applies a declared hash when it creates the account). Check that it did,
+# rather than trust it: this is the first time the key, the file and
+# sops-nix meet, and a machine nobody can log into is the failure mode.
+#
+# Without secrets: straight into the target's /etc/shadow, so no password
+# material is written into the flake, which therefore stays publishable.
 #
 # chpasswd is resolved out of the TARGET's store rather than called by name:
 # a freshly installed system has no `chpasswd` on its system path (shadow is
@@ -690,7 +1145,33 @@ set_target_password() {
   return $rc
 }
 
-if set_target_password "$username" "$(get_answer "identity:password")"; then
+shadow_hash=$(awk -F: -v u="$username" '$1 == u { print $2 }' "$TARGET/etc/shadow" 2>/dev/null || true)
+# The hash we expect is there exactly when the password travels through the
+# secrets: a fresh install that set them up, or a restore whose repo holds it.
+if [ -s "$WORK/password.hash" ] && [ -n "$shadow_hash" ] && [ "$shadow_hash" = "$(cat "$WORK/password.hash")" ]; then
+  note "Password set for $username, from the encrypted config."
+elif [ "$RESTORE_PW_DECLARED" = 1 ]; then
+  # The config sets the password its own way; all that can be checked is
+  # that it did not leave the account locked.
+  case "$shadow_hash" in
+    ""|"!"*|"*"*)
+      warn "$username's account is LOCKED after activation: the config's declared password is empty or a placeholder."
+      warn "Fix it in the repo, or from this medium before rebooting:"
+      warn "  nixos-enter --root $TARGET -c 'passwd $username'"
+      ;;
+    *) note "Password set for $username, as the config declares it." ;;
+  esac
+elif [ -s "$WORK/password.hash" ] && [ "$install_mode" = restore ]; then
+  # No typed password to fall back on: the repo was the only source.
+  warn "The password did not come through from the repo's secrets."
+  warn "The system IS installed, but log in may fail. From this medium, before rebooting:"
+  warn "  nixos-enter --root $TARGET -c 'passwd $username'"
+elif [ -s "$WORK/password.hash" ]; then
+  warn "The password did not come through from the encrypted config; setting it directly."
+  warn "The machine will still boot; check 'wasisabi-secrets' after logging in."
+  set_target_password "$username" "$(get_answer "identity:password")" \
+    || die "could not set the password for $username by either route. From this medium: nixos-enter --root $TARGET -c 'passwd $username'"
+elif set_target_password "$username" "$(get_answer "identity:password")"; then
   note "Password set for $username."
 else
   # NOT "log in as root": the install ran with --no-root-password and the
@@ -703,14 +1184,29 @@ else
   warn "  nixos-enter --root $TARGET -c 'passwd $username'"
 fi
 
-# Make the flake editable by its owner without sudo. Read the ids out of the
-# target's own passwd rather than asking the running system, whose accounts
-# have nothing to do with the installed machine's.
+# The home was made here, as root, before the account existed: the repo and
+# the owner's copy of the age key are in it. Hand all of it over. Read the
+# ids out of the target's own passwd rather than asking the running system,
+# whose accounts have nothing to do with the installed machine's.
 ids=$(awk -F: -v u="$username" '$1 == u { print $3":"$4 }' "$TARGET/etc/passwd" || true)
 if [ -n "$ids" ]; then
-  chown -R "$ids" "$TARGET/etc/nixos"
+  chown -R "$ids" "$TARGET/home/$username"
+  # A restored config may keep its repo outside the home.
+  case "$REPO_PATH" in
+    "/home/$username"/*) ;;
+    *) chown -R "$ids" "$REPO" ;;
+  esac
 else
-  warn "could not find $username in the installed passwd; /etc/nixos stays root-owned (edit with sudo)."
+  warn "could not find $username in the installed passwd; ~/nixos stays root-owned (edit with sudo)."
+fi
+
+# The link the flake declares. Created by activation during the install; a
+# missing one means a bare `nixos-rebuild` will not find the flake.
+# Only the link itself is checked: its target is absolute (/etc/static/...),
+# so resolving it from here would follow the INSTALLER's /etc, not the
+# target's.
+if [ ! -L "$TARGET/etc/nixos" ]; then
+  warn "/etc/nixos does not link to $REPO_PATH on the installed system; rebuild with --flake $REPO_PATH#$FLAKE_ATTR."
 fi
 
 # ── done ──────────────────────────────────────────────────────────────────
@@ -720,14 +1216,27 @@ gum style --border rounded --padding "1 3" --border-foreground 141 \
   "$(gum style --bold "$hostname is installed.")" \
   "" \
   "Log in as $username." \
-  "Your config is /etc/nixos, a normal flake you own:" \
-  "  sudo nixos-rebuild switch --flake /etc/nixos#$hostname" \
+  "Your config is $REPO_PATH$([ -L "$TARGET/etc/nixos" ] && echo " (/etc/nixos links to it)"): a git repo" \
+  "that rebuilds this machine. Edit it, then:" \
+  "  sudo nixos-rebuild switch$([ -L "$TARGET/etc/nixos" ] || echo " --flake $REPO_PATH#$FLAKE_ATTR")" \
+  "$(if [ "$install_mode" = restore ]; then
+      if [ "$RESTORE_DISKO" = 1 ]; then
+        echo "Restored exactly as it was: its own disko layout, no new commit."
+      else
+        echo "Restored as it was, plus one commit with this machine's new"
+        echo "hardware-configuration.nix. Push it (git push) to keep it."
+      fi
+    else
+      echo "Push it somewhere (git remote add ...) and it can also"
+      echo "rebuild this machine after a wipe$([ "$secrets_mode" != skip ] && echo ", with your age key")."
+    fi)" \
   "" \
+  "Secrets: wasisabi-secrets --help" \
   "Options: nixos-option wasisabi, or modules/options.nix upstream."
 
 # A machine-readable line, so an automated install can be checked for success
 # rather than for the absence of an error message.
-echo "WASISABI_INSTALL_OK host=$hostname user=$username layout=$layout"
+echo "WASISABI_INSTALL_OK host=$hostname user=$username layout=$layout secrets=$secrets_mode mode=$install_mode"
 
 if [ "$NO_REBOOT" = 1 ]; then
   note "Leaving the machine running (--no-reboot)."

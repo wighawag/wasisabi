@@ -136,9 +136,65 @@ nix build github:wighawag/wasisabi#iso-offline      # LIVE: try it first; carrie
 sudo wasisabi-install
 ```
 
-It asks for the machine's identity (hostname, user, password, timezone, locale, **keyboard layout**), then for the disk, and then offers wasisabi's own options: greeter, shell, terminal, browser, file manager, apps, services. Skip that last part and you get the defaults, which are not written into your config and therefore keep following the project.
+It asks for the machine's identity (hostname, user, password, timezone, locale, **keyboard layout**), then for the disk, then whether to set up **encrypted secrets** (recommended, see below), and then offers wasisabi's own options: greeter, shell, terminal, browser, file manager, apps, services. Skip that last part and you get the defaults, which are not written into your config and therefore keep following the project.
 
-What it leaves behind is **an ordinary flake you own** at `/etc/nixos`: `flake.nix`, `configuration.nix`, the `hardware-configuration.nix` it generated, and a `flake.lock` pinned to exactly the revision the ISO installed. It is a git repo with one commit. Nothing reads it back, nothing manages it, and removing the two module imports leaves you with a working NixOS machine that has never heard of wasi-sabi.
+What it leaves behind is **an ordinary flake you own** at `~/nixos`, with `/etc/nixos` a link to it: `flake.nix`, `configuration.nix`, the `hardware-configuration.nix` it generated, a `flake.lock` pinned to exactly the revision the ISO installed, and with secrets set up, `.sops.yaml` and `secrets/secrets.yaml`. It is a git repo with two commits: the install, then the secrets. Nothing reads it back, nothing manages it, and removing the two module imports leaves you with a working NixOS machine that has never heard of wasi-sabi.
+
+### Your config repo
+
+`~/nixos` is the machine. The ISO is only the bootstrap: from then on, the machine changes when the repo changes.
+
+```sh
+cd ~/nixos && $EDITOR configuration.nix
+sudo nixos-rebuild switch          # /etc/nixos links here, so no --flake needed
+git commit -am "..." && git push   # after `git remote add origin ...` once
+```
+
+**Secrets.** The repo holds only what evaluation needs in the clear. Values that should not be public (your password's hash first, then any token you add) live in `secrets/secrets.yaml`, encrypted with [sops](https://github.com/getsops/sops) to one age key per repo. Only the key's public half is in the repo, so the repo can be pushed anywhere. The private key is in two places on the machine: `/var/lib/sops-nix/key.txt`, which sops-nix reads at boot, and `~/.config/sops/age/keys.txt`, which you use to edit. The installer shows it to you once and asks you to save a copy somewhere else. Keep that copy: the repo plus the key is the whole machine.
+
+```sh
+wasisabi-secrets edit       # the secrets file, decrypted, in $EDITOR
+wasisabi-secrets password   # change your login password, in the repo AND now
+wasisabi-secrets backup     # show the key again (text and QR code)
+wasisabi-secrets init       # set it all up later, if you skipped it at install
+```
+
+Change your password with `wasisabi-secrets password`. Plain `passwd` still works, but only on this machine: NixOS applies a declared password when it creates the account, so a reinstall would bring back the one in the repo.
+
+Only values can be secret. sops-nix decrypts on the machine at activation, after Nix has evaluated the config, so the username, the hostname and which services run are in the clear by construction. If those should not be public, keep the repo private.
+
+**From another machine.** Edit a clone anywhere and deploy it over ssh. The secrets are decrypted on the target with the target's own key, so the machine you deploy from does not need the key (only editing the secrets does):
+
+```sh
+nixos-rebuild switch --flake .#HOSTNAME --target-host you@HOSTNAME --sudo
+```
+
+**After a wipe, or on a new disk.** Boot the ISO, run `sudo wasisabi-install`, and choose `restore` at the first question. It asks for the repo (anything `git clone` takes: a URL, or a path on a USB stick) and your age key, and then only for the disk. Everything else is read from the repo: hostname, user, keyboard, every option, and your password (from the encrypted secrets). Before touching the disk it proves the key opens the repo's secrets and evaluates the whole system, so a wrong key or a config that no longer builds stops it with nothing wiped. The only change it makes to your repo is a new `hardware-configuration.nix` for the new disks, as one commit you can push.
+
+```sh
+wasisabi-install --answers restore.json   # the same, unattended:
+# { "install:mode": "restore", "restore:source": "https://...", "restore:ageKey": "AGE-SECRET-KEY-1...",
+#   "disk:device": "/dev/nvme0n1", "disk:layout": "luks", "disk:passphrase": "..." }
+```
+
+On the offline ISO a restore works with no network only if the repo's `flake.lock` still pins what the medium carries; once you have updated, restore from the netinstall ISO or with a network.
+
+**A fleet repo works too**, where the wasisabi machine is one host among several (colmena, nixos-anywhere, per-host keys). Restore follows what the chosen host's config declares and only falls back to its own conventions where the config says nothing:
+
+- **Disks.** A config that declares them with [disko](https://github.com/nix-community/disko) is partitioned by that declaration (`disko --flake repo#host`), and the repo goes back untouched. Otherwise the config must take its root filesystem from `./hardware-configuration.nix`, which restore regenerates; anything else is refused before the disk is touched, because partitioning it any other way gives a machine that installs and does not boot.
+- **Access.** `restore:sshKeyFile` (a key file on the USB stick) is used for the clone and for `git+ssh://` flake inputs, from RAM, and never copied to the disk.
+- **Secrets encrypted to the host's SSH key.** Declare what has to be on disk before the first boot, and restore decrypts it with the key you give it (the admin key, in a fleet) and puts it in place:
+
+  ```nix
+  wasisabi.restore.files."/etc/ssh/ssh_host_ed25519_key" = {
+    sopsFile = ../../secrets/laptop/ssh-host-key;   # encrypted to the admin key
+    mode = "0600";
+  };
+  ```
+
+- **The key you give it** goes only where the config reads one: both places for a config made by `wasisabi-secrets`, `sops.age.keyFile` if the config names one, and otherwise nowhere. An admin key is not left on a laptop as a side effect of reinstalling it.
+- **The password** the config declares (its own sops secret, a hash) is trusted, not asked for.
+- **Where the repo goes** is asked (`restore:repoPath`), defaulting to the `/etc/nixos` link the config declares, or `~/nixos`.
 
 **The offline ISO is a live system.** It boots straight into the wasisabi desktop (user `nixos`, no password), so the machine can be tried before anything touches its disk: a welcome terminal says what to try and holds the install command. Everything runs from the stick and from RAM; the local model starts on first use rather than at boot, to spare that RAM. Its boot menu also has a **text installer only** entry, which is the plain installer with no desktop.
 
@@ -156,10 +212,12 @@ See [`notes/installer.md`](notes/installer.md) for how it works, what is verifie
 ### By hand, without the ISO
 
 ```sh
-nix flake new -t github:wighawag/wasisabi ~/systems/my-laptop
+nix flake new -t github:wighawag/wasisabi ~/nixos
 # edit configuration.nix (username, hostname, stateVersion), drop in
 # hardware-configuration.nix, pick a nixos-hardware module, then:
-sudo nixos-rebuild switch --flake ~/systems/my-laptop
+cd ~/nixos && git init && git add -A
+sudo nixos-rebuild switch --flake ~/nixos
+wasisabi-secrets init    # optional: sops secrets, starting with your password
 ```
 
 The installer fills in this same template, so the two paths cannot diverge.
@@ -177,6 +235,9 @@ against *your* pin (they are plain modules: `pkgs` comes from whichever
 wasisabi = {
   url = "github:YOUR_NAME/wasisabi";
   inputs.nixpkgs.follows = "nixpkgs";
+  # If your config already imports sops-nix: follow yours, so both imports
+  # are the same module and it is not declared twice.
+  # inputs.sops-nix.follows = "sops-nix";
 };
 ```
 

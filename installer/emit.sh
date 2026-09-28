@@ -74,8 +74,8 @@ if [ -z "$STATE_VERSION" ]; then
 fi
 
 mkdir -p "$OUT"
-cp "$TEMPLATE/flake.nix" "$TEMPLATE/configuration.nix" "$OUT/"
-chmod u+w "$OUT/flake.nix" "$OUT/configuration.nix"
+cp "$TEMPLATE/flake.nix" "$TEMPLATE/configuration.nix" "$TEMPLATE/.gitignore" "$OUT/"
+chmod u+w "$OUT/flake.nix" "$OUT/configuration.nix" "$OUT/.gitignore"
 
 # Render the Nix lines for one block ("system" or "home"), in the order the
 # questions were asked. Values are typed from questions.json rather than
@@ -172,18 +172,19 @@ if [ -n "$WASISABI_URL" ] && [ "$WASISABI_URL" != "$DEFAULT_URL" ]; then
   sed -i "s/url = \"${DEFAULT_URL//\//\\/}\";/url = \"$escaped\";/" "$OUT/flake.nix"
 fi
 
-# The password is deliberately not written into the flake: the installer sets
-# it in the target's /etc/shadow with chpasswd, exactly as any other distro
-# does, so this file can be pushed to a public repository as it stands.
+# The password is deliberately not written into the flake in the clear: its
+# hash goes into the sops-encrypted secrets file (wasisabi-secrets init), or,
+# without secrets, into the target's /etc/shadow with chpasswd. Either way
+# this file can be pushed to a public repository as it stands.
 python3 - "$OUT/configuration.nix" <<'PYTHON'
 import re, sys
 
 path = sys.argv[1]
 text = open(path).read()
-replacement = """    # Password: set at install time straight into /etc/shadow, so that no
-    # password material lives in this flake. Change it with `passwd`. To make
-    # it declarative instead, use `hashedPasswordFile` pointing at a file
-    # OUTSIDE the flake (`mkpasswd -m yescrypt > /etc/wasisabi-password`).
+replacement = """    # Password: never in this file. With secrets set up (see
+    # wasisabi.secrets below) its hash is in secrets/secrets.yaml, encrypted,
+    # and `wasisabi-secrets password` changes it. Without, it was set at
+    # install time straight into /etc/shadow and `passwd` changes it.
 """
 text, count = re.subn(
     r'^[ \t]*initialPassword = "CHANGEME_PASSWORD";[ \t]*\n', replacement, text, flags=re.M

@@ -92,7 +92,17 @@ let
             # build them, and their toolchains, from source.
             wasisabi = settingsFor "system" index // {
               user = "payload";
+              # SECRETS, as the installer's recommended path sets them up.
+              # sops-install-secrets is built by sops-nix against our nixpkgs
+              # and no public cache carries it, so without a payload that
+              # uses secrets an offline target would have to compile it, Go
+              # toolchain and all. The file here is a stand-in (validation is
+              # off): what matters is the closure, which is the same for any
+              # file. The target still validates its REAL file when it builds
+              # its own manifest, with this same sops-install-secrets.
+              secrets.sopsFile = builtins.toFile "payload-secrets.yaml" "";
             };
+            sops.validateSopsFiles = false;
 
             home-manager.users.payload = {
               imports = [ self.homeModules.wasisabi ];

@@ -22,7 +22,14 @@
 #                than decorative.
 #
 # Usage:
-#   ./scripts/test-install-vm.sh [--luks] [--offline] [--stage N]
+#   ./scripts/test-install-vm.sh [--luks] [--offline] [--restore] [--restore-fleet] [--stage N]
+#
+# --restore installs from an existing config repo (the restore-fixture
+# output: two commits, sops secrets with the published test key) instead of
+# answering questions, and checks the machine came out as the REPO describes.
+# --restore-fleet does the same from a two-host FLEET repo shaped like
+# my-boxes (installer/test-fleet): disks declared with disko, secrets
+# encrypted to the host's SSH key, the host key placed from the repo.
 #
 # The disk image is always kept afterwards, for inspection.
 set -euo pipefail
@@ -40,6 +47,8 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --luks) VARIANT="luks"; ISO_ATTR="iso-autotest-luks"; shift ;;
     --offline) VARIANT="offline"; ISO_ATTR="iso-autotest-offline"; shift ;;
+    --restore) VARIANT="restore"; ISO_ATTR="iso-autotest-restore"; shift ;;
+    --restore-fleet) VARIANT="restore-fleet"; ISO_ATTR="iso-autotest-restore-fleet"; shift ;;
     --stage) ONLY_STAGE="$2"; shift 2 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
@@ -145,6 +154,68 @@ if want_stage 1; then
 
   if grep -q "WASISABI_INSTALL_OK" "$SERIAL"; then
     ok "installer reported success: $(grep -o 'WASISABI_INSTALL_OK.*' "$SERIAL" | head -1)"
+
+    if [ "$VARIANT" = restore-fleet ]; then
+      if grep -q "WASISABI_INSTALL_OK host=laptop user=tester layout=disko .*mode=restore" "$SERIAL"; then
+        ok "restored the fleet's laptop, partitioned by its own disko declaration"
+      else
+        bad "the fleet restore did not report host=laptop with layout=disko"
+      fi
+      if grep -q "Placed /etc/ssh/ssh_host_ed25519_key" "$SERIAL"; then
+        ok "the host key was placed from the repo before the first boot"
+      else
+        bad "the host key was not placed"
+      fi
+      # The laptop decrypts with its host key: if its own password secret
+      # came through, the placed key was the right one.
+      if grep -q "Password set for tester, as the config declares it" "$SERIAL"; then
+        ok "the config's own password secret was decrypted with the placed host key"
+      else
+        bad "the declared password did not come through"
+      fi
+      if grep -q "used for this restore only" "$SERIAL"; then
+        ok "the admin key was not copied to the new disk"
+      else
+        bad "the admin key's placement was not the expected one"
+      fi
+    elif [ "$VARIANT" = restore ]; then
+      # The restore answers name only the source, the key and the disk. The
+      # hostname and user are the fixture repo's, so seeing them here means
+      # they were read out of the repo.
+      if grep -q "WASISABI_INSTALL_OK host=restored user=mira .*mode=restore" "$SERIAL"; then
+        ok "restored the repo's machine (host and user read from the repo)"
+      else
+        bad "the restore did not produce the repo's host and user"
+      fi
+      if grep -q "Your key opens the repo's secrets" "$SERIAL"; then
+        ok "the key was proved against the repo's secrets before partitioning"
+      else
+        bad "the key was not checked against the repo"
+      fi
+    # The answers file says nothing about secrets, so this also checks that
+    # an unanswered secrets question takes the recommended default.
+    elif grep -q "WASISABI_INSTALL_OK.*secrets=generate" "$SERIAL"; then
+      ok "secrets were set up with a generated key (the default)"
+    else
+      bad "secrets were not set up by default"
+    fi
+    # The first time the key, the encrypted file and sops-nix meet: the
+    # installer compares the hash activation put in /etc/shadow with the one
+    # it encrypted, and only says this when they are equal.
+    if [ "$VARIANT" = restore-fleet ]; then
+      : # its password is the config's own secret, checked above
+    elif grep -q "from the encrypted config" "$SERIAL"; then
+      ok "the login password came from the sops-encrypted config"
+    else
+      bad "the password did not come from the encrypted config"
+    fi
+    if [ "$VARIANT" = restore-fleet ]; then
+      : # the fleet repo declares no /etc/nixos link, by design
+    elif grep -q "does not link to" "$SERIAL"; then
+      bad "/etc/nixos is not a link on the installed system"
+    else
+      ok "/etc/nixos links to the config repo"
+    fi
   else
     bad "no success sentinel in the install log; last lines:"
     tail -30 "$SERIAL" | sed 's/^/      /'

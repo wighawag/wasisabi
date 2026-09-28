@@ -247,6 +247,103 @@
       '';
     };
 
+    # ── Secrets: sops-encrypted values in the owner's own flake. See
+    # modules/secrets.nix and `wasisabi-secrets --help`.
+
+    secrets.sopsFile = lib.mkOption {
+      type = lib.types.nullOr lib.types.path;
+      default = null;
+      example = lib.literalExpression "./secrets/secrets.yaml";
+      description = ''
+        The machine's sops-encrypted secrets file, committed to its flake. Null
+        (the default) leaves secrets off entirely.
+
+        Set by `wasisabi-secrets init`, which the installer runs for you:
+        it creates an age key, encrypts the file to it and uncomments this
+        line in configuration.nix. The file is safe to publish; only the age
+        key can read it, and the key lives outside the flake (see
+        `secrets.ageKeyFile`).
+      '';
+    };
+
+    secrets.ageKeyFile = lib.mkOption {
+      type = lib.types.str;
+      default = "/var/lib/sops-nix/key.txt";
+      description = ''
+        Where the machine's age private key lives. It is read at activation to
+        decrypt `secrets.sopsFile`, so it must exist on the machine and must
+        NOT be in the flake. The owner keeps a backup of it: with the key and
+        the flake, a wiped machine is reinstalled as it was.
+      '';
+    };
+
+    secrets.ownerPassword = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
+      description = ''
+        Take the owner's login password from the secret `owner-password` (a
+        crypt hash, as `mkpasswd` makes) instead of leaving it to `passwd`.
+        Only takes effect when `secrets.sopsFile` is set.
+
+        This is what makes a reinstall from the flake log in with the same
+        password. NixOS applies it when the account is CREATED; on an existing
+        machine, `wasisabi-secrets password` changes both the secret and the
+        live password, whereas plain `passwd` changes only the live one.
+      '';
+    };
+
+    restore.files = lib.mkOption {
+      type = lib.types.attrsOf (
+        lib.types.submodule {
+          options = {
+            sopsFile = lib.mkOption {
+              type = lib.types.path;
+              description = "The sops-encrypted file in the repo that holds the content.";
+            };
+            format = lib.mkOption {
+              type = lib.types.enum [ "binary" "yaml" "json" "dotenv" "ini" ];
+              default = "binary";
+              description = "How sops reads `sopsFile` (sops' --input-type).";
+            };
+            extract = lib.mkOption {
+              type = lib.types.nullOr lib.types.str;
+              default = null;
+              example = ''["ssh"]["hostKey"]'';
+              description = "For a structured file, the one value to place (sops' --extract). Null places the whole decrypted file.";
+            };
+            mode = lib.mkOption {
+              type = lib.types.str;
+              default = "0400";
+              description = "File mode on the target. Owned by root.";
+            };
+          };
+        }
+      );
+      default = { };
+      example = lib.literalExpression ''
+        {
+          "/etc/ssh/ssh_host_ed25519_key" = {
+            sopsFile = ./secrets/laptop/ssh-host-key;
+            mode = "0600";
+          };
+        }
+      '';
+      description = ''
+        Files the installer's RESTORE mode decrypts out of the repo, with the
+        owner's age key, and places on the new disk BEFORE the first boot.
+        Nothing reads this option on a running machine; it is the config
+        telling a restore what it needs that the Nix store must never hold.
+
+        The case it exists for: a machine whose sops secrets are encrypted to
+        its SSH host key (the fleet pattern, `sops.age.sshKeyPaths`) rather
+        than to an age key file. Such a machine can decrypt nothing until
+        that host key is back, so the repo keeps the private key encrypted to
+        the admin key and a restore puts it at /etc/ssh before activation.
+        A config set up by `wasisabi-secrets` needs none of this: its key is
+        the one the restore is given.
+      '';
+    };
+
     llm.enable = lib.mkOption {
       type = lib.types.bool;
       default = true;

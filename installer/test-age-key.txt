@@ -1,0 +1,4 @@
+# A TEST KEY, PUBLISHED ON PURPOSE. It protects nothing: the flake checks and
+# the VM install test use it so their encrypted fixtures can be decrypted by
+# anyone. Never use it for a real machine.
+AGE-SECRET-KEY-1604YFPHUD4PQRR08UHEX8S0DDCH894LTMDWYEC3L8F7UD2LZMFFSPU8PCY

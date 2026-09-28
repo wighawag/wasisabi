@@ -30,6 +30,11 @@
 
   networking.hostName = "CHANGEME_HOSTNAME";
 
+  # Where this flake lives. /etc/nixos is a link to it, so a plain
+  # `sudo nixos-rebuild switch` finds it with no --flake argument. If you keep
+  # the repo somewhere else, change this path.
+  environment.etc."nixos".source = "/home/CHANGEME_USERNAME/nixos";
+
   users.users.CHANGEME_USERNAME = {
     isNormalUser = true;
     extraGroups = [ "wheel" "networkmanager" "video" ];
@@ -47,6 +52,12 @@
   # Who the machine belongs to: the account the agent layer (pi, wherever,
   # the local model and search) is set up for.
   wasisabi.user = "CHANGEME_USERNAME";
+
+  # Encrypted secrets (sops), including your password's hash, readable only
+  # with this machine's age key, which is never in this repo. Set up by
+  # `wasisabi-secrets init` (the installer runs it for you), which uncomments
+  # the line below. `wasisabi-secrets --help` for the rest.
+  # wasisabi.secrets.sopsFile = ./secrets/secrets.yaml;
 
   # Ordinary Nix, and yours. Every value wasisabi sets is a mkDefault, so each
   # line below simply wins; delete one and that option falls back to the

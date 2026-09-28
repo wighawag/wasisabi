@@ -13,6 +13,7 @@
   lib,
   symlinkJoin,
   writeShellApplication,
+  age,
   bash,
   ckbcomp,
   coreutils,
@@ -29,14 +30,18 @@
   gum,
   jq,
   kbd,
+  mkpasswd,
   nix,
   nixos-install-tools,
+  openssh,
   python3,
+  sops,
   util-linux,
 
   questions,
   template,
   targetLock,
+  secretsTool,
   stateVersion,
   nixpkgsSource,
   offline ? false,
@@ -66,6 +71,7 @@ let
   install = writeShellApplication {
     name = "wasisabi-install";
     runtimeInputs = [
+      age
       bash
       ckbcomp
       coreutils
@@ -82,9 +88,14 @@ let
       gum
       jq
       kbd
+      mkpasswd
       nix
       nixos-install-tools
+      # ssh for a restore from a private repo or git+ssh flake inputs
+      openssh
       python3
+      secretsTool
+      sops
       util-linux
     ];
     text = ''
@@ -110,6 +121,8 @@ symlinkJoin {
   paths = [
     install
     emit
+    # On the medium's PATH too, for `wasisabi-secrets keygen` by hand.
+    secretsTool
   ];
   meta = {
     description = "Interactive installer for a wasi-sabi machine";

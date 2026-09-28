@@ -20,10 +20,69 @@
 {
   groups = [
     {
+      title = "Install or restore";
+      essential = true;
+      items = [
+        {
+          key = "install:mode";
+          kind = "enum";
+          prompt = "What to install";
+          default = "fresh";
+          values = [ "fresh" "restore" ];
+          help = "fresh: a new machine, from the questions that follow. restore: this machine (or a wiped one) from a config repo you already have, the ~/nixos a previous install made: the same system, the same password, only the disks are new. Restore asks for the repo and your age key instead of the questions, because the answers are in the repo.";
+        }
+        {
+          key = "restore:source";
+          kind = "text";
+          prompt = "Your config repo";
+          default = "";
+          help = "Anything `git clone` takes: https://github.com/you/nixos, a path on a USB stick you mounted (mount /dev/sdX1 /media), or a git bundle file. A private repo over https needs its token in the URL.";
+          onlyIf = { key = "install:mode"; equals = "restore"; };
+        }
+        {
+          key = "restore:host";
+          kind = "text";
+          prompt = "Which machine in it";
+          default = "";
+          help = "The nixosConfigurations name. Leave empty when the repo has only one, which is the case for a repo the installer made.";
+          onlyIf = { key = "install:mode"; equals = "restore"; };
+        }
+        {
+          key = "restore:sshKeyFile";
+          kind = "text";
+          prompt = "An SSH key for fetching it (optional)";
+          default = "";
+          help = "Path to a private SSH key file, e.g. on the USB stick, for a repo or flake inputs fetched over ssh (git@github.com:..., git+ssh://). It is used only by this installer, from RAM, and not copied to the new disk. Leave empty for a public repo or a local path.";
+          onlyIf = { key = "install:mode"; equals = "restore"; };
+        }
+        {
+          key = "restore:ageKey";
+          kind = "agekey";
+          optional = true;
+          prompt = "Your age secret key";
+          help = "The key you saved when the config was set up (AGE-SECRET-KEY-1...), or, for a fleet repo, the admin key its secrets are encrypted to. It is checked against the repo's secrets before any disk is touched. Leave empty only if the repo has no secrets.";
+          onlyIf = { key = "install:mode"; equals = "restore"; };
+        }
+        {
+          key = "restore:repoPath";
+          kind = "text";
+          prompt = "Where to put the repo on the new disk";
+          default = "";
+          help = "An absolute path, e.g. /home/you/src/my-boxes. Empty: where the config says it lives (the /etc/nixos link a wasisabi config declares), else ~/nixos of the machine's owner.";
+          onlyIf = { key = "install:mode"; equals = "restore"; };
+        }
+      ];
+    }
+
+    {
       title = "Machine identity";
       # Essential groups are always asked. The rest are wasisabi's own
       # opinions, which the installer offers to skip in one go: see install.sh.
       essential = true;
+      # A restore takes identity, secrets and options from the repo: asking
+      # them again could only disagree with it. (Every non-essential group is
+      # skipped on restore too; see install.sh.)
+      skipWhen = { key = "install:mode"; equals = "restore"; };
       items = [
         {
           key = "identity:hostname";
@@ -45,7 +104,7 @@
           key = "identity:password";
           kind = "password";
           prompt = "Password for that account";
-          help = "Set in the installed system with chpasswd, exactly as on any other distro. It is deliberately NOT written into the flake, so the flake stays publishable.";
+          help = "Never written into the flake in the clear. With secrets set up (asked after the disk) its hash goes in encrypted, so a reinstall from your config keeps it; without, it is set on this machine only, with chpasswd.";
         }
         { option = "system:timeZone"; }
         { option = "system:locale"; }
@@ -58,6 +117,10 @@
     {
       title = "Disk";
       essential = true;
+      # A restored config that declares its own disks (disko) is partitioned
+      # by that declaration, so there is nothing to choose here. Set by
+      # install.sh, never answered.
+      skipWhen = { key = "restore:disko"; equals = "true"; };
       items = [
         {
           key = "disk:device";
@@ -79,6 +142,29 @@
           prompt = "LUKS passphrase";
           help = "Asked twice. Type it on the keyboard layout you chose above: that layout is carried into the initrd, which is the keyboard this passphrase will be typed on at every boot.";
           onlyIf = { key = "disk:layout"; equals = "luks"; };
+        }
+      ];
+    }
+
+    {
+      title = "Secrets";
+      essential = true;
+      skipWhen = { key = "install:mode"; equals = "restore"; };
+      items = [
+        {
+          key = "secrets:mode";
+          kind = "enum";
+          prompt = "Encrypted secrets for your config (recommended)";
+          default = "generate";
+          values = [ "generate" "import" "skip" ];
+          help = "Your config is a git repo at ~/nixos that can rebuild this machine, and can be pushed anywhere. Secrets in it (your password's hash first) are encrypted with sops to an age key that stays OFF the repo. generate: make a new key now; you will be shown it and asked to save a copy, because with the repo and that key a wiped machine comes back as it was. import: paste the key of a config you already have. skip: set it up later with `wasisabi-secrets init`; the password is then set the classic way and lives only on this machine.";
+        }
+        {
+          key = "secrets:ageKey";
+          kind = "agekey";
+          prompt = "Your age secret key";
+          help = "The line starting AGE-SECRET-KEY-1 that you saved when this config was first set up. It is not echoed and is never written to the repo.";
+          onlyIf = { key = "secrets:mode"; equals = "import"; };
         }
       ];
     }
@@ -183,6 +269,10 @@
     "system:enable" = "The installer is installing wasisabi; asking whether to enable it is not a question.";
     "home:enable" = "Same: the home layer is the point of installing, and the generated configuration.nix shows the line so it can be removed by hand later.";
     "system:user" = "Not a question: it is the account created under Machine identity, substituted into the template (CHANGEME_USERNAME), so it can never name a different user than the one being created.";
+    "system:secrets.sopsFile" = "Not a question: it is set by the secrets step (`wasisabi-secrets init`), which the installer runs after its own Secrets question, because the file has to exist and be encrypted before the line can point at it.";
+    "system:secrets.ageKeyFile" = "Where the key lives is plumbing, not a preference; the default is where sops-nix documents it and where `wasisabi-secrets` puts it.";
+    "system:secrets.ownerPassword" = "Follows from answering the Secrets question at all: an owner who sets secrets up gets a reinstallable password, and one who does not never reaches this option.";
+    "system:restore.files" = "Not a question: it is read BY the restore mode, out of a config that already exists, and a fresh install has nothing encrypted to place.";
     "system:anon.accounts" = "A pool of account names with pinned uids is structure, not an answer; the defaults (anon, anon-john, anon-jane) are what every machine should start with, and changing the pool is a deliberate edit to configuration.nix.";
   };
 }

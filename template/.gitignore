@@ -1,0 +1,13 @@
+# Never commit these. Note that ignoring a file also hides it from the flake:
+# Nix only sees tracked files, so anything the config needs must be tracked,
+# and anything sensitive belongs in secrets/ (sops-encrypted), not here.
+
+# nixos-rebuild build / nix build output links
+result
+result-*
+
+# Plaintext age keys, and anything decrypted by hand
+keys.txt
+*.agekey
+*.dec
+*.decrypted*

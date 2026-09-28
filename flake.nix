@@ -29,6 +29,17 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
+    # Secrets for the owner's own config: the machine's flake keeps its
+    # sensitive values (the login password's hash, tokens) sops-encrypted to
+    # an age key, and sops-nix decrypts them on activation. Imported by the
+    # system layer so the generated flake needs no extra input, and pinned in
+    # the installed machine's lock like everything else. See
+    # modules/secrets.nix.
+    sops-nix = {
+      url = "github:Mic92/sops-nix";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+
     # Used by the INSTALLER only (partitioning, and the hardware module the
     # generated flake offers users). Flake inputs are fetched on access, so
     # consumers who only import the module layers never pull these.
@@ -53,6 +64,7 @@
       home-manager,
       noctalia,
       nixos-modules,
+      sops-nix,
       disko,
       nixos-hardware,
       ...
@@ -71,11 +83,12 @@
       questions = import ./installer/questions.nix { inherit lib; };
       questionsJson = pkgs.writeText "wasisabi-questions.json" (builtins.toJSON questions);
       targetLock = pkgs.callPackage ./installer/lock.nix { inherit self; };
+      secretsTool = pkgs.callPackage ./pkgs/wasisabi-secrets/package.nix { };
 
       mkInstaller =
         { offline }:
         pkgs.callPackage ./installer/package.nix {
-          inherit offline targetLock;
+          inherit offline targetLock secretsTool;
           questions = questionsJson;
           template = ./template;
           stateVersion = release;
@@ -104,6 +117,127 @@
                 | .["disk:passphrase"] = "testpassphrase"' \
               ${./installer/test-answers-vm.json} > $out
           '';
+
+      # A config repo to restore from, for the VM test: what a fresh install
+      # leaves in ~/nixos (emit, pinned lock, the secrets step with the
+      # published test key), as a real git repo with its two commits. Its
+      # hostname and user are ones the restore answers never mention, so a
+      # restored machine that has them can only have read them from the repo.
+      restoreFixture =
+        pkgs.runCommand "wasisabi-restore-fixture"
+          {
+            nativeBuildInputs = [
+              pkgs.git
+              pkgs.jq
+              pkgs.mkpasswd
+              pkgs.python3
+            ];
+          }
+          ''
+            export HOME=$TMPDIR
+            jq '.["identity:hostname"] = "restored" | .["identity:username"] = "mira"' \
+              ${./installer/test-answers-vm.json} > answers.json
+            mkdir -p $out
+            bash ${./installer/emit.sh} --questions ${questionsJson} --answers answers.json \
+              --template ${./template} --out $out --state-version ${release} \
+              --wasisabi-url ${targetLock.url}
+            install -m 0644 ${targetLock}/flake.lock $out/flake.lock
+            # A stand-in: the restore replaces it with the real machine's.
+            install -m 0644 ${./installer/test-hardware.nix} $out/hardware-configuration.nix
+            git -C $out init -q -b main
+            git -C $out add -A
+            git -C $out -c user.name=t -c user.email=t@t commit -q -m "Install restored"
+            printf '%s' testpassword | mkpasswd -m yescrypt --stdin > $TMPDIR/hash
+            ${lib.getExe secretsTool} init --repo $out --root $TMPDIR/root --user mira \
+              --key-file ${./installer/test-age-key.txt} --password-hash-file $TMPDIR/hash --yes
+          '';
+
+      restoreAnswers = pkgs.writeText "wasisabi-autotest-answers-restore.json" (
+        builtins.toJSON {
+          "install:mode" = "restore";
+          "restore:source" = "${restoreFixture}";
+          "restore:ageKey" = lib.last (
+            lib.filter (l: lib.hasPrefix "AGE-SECRET-KEY-1" l) (
+              lib.splitString "\n" (builtins.readFile ./installer/test-age-key.txt)
+            )
+          );
+          "disk:device" = "/dev/vda";
+          "disk:layout" = "plain";
+        }
+      );
+
+      # A FLEET repo to restore from: two hosts, the wasisabi one declaring
+      # its disks with disko, decrypting with its SSH host key, taking its
+      # password from its own secret, and keeping its private host key in the
+      # repo encrypted to the admin key (the test key) only. my-boxes' nono,
+      # in miniature. See installer/test-fleet/hosts/laptop/default.nix.
+      restoreFleetFixture =
+        pkgs.runCommand "wasisabi-restore-fleet-fixture"
+          {
+            nativeBuildInputs = [
+              pkgs.age
+              pkgs.git
+              pkgs.mkpasswd
+              pkgs.openssh
+              pkgs.sops
+              pkgs.ssh-to-age
+            ];
+          }
+          ''
+            export HOME=$TMPDIR
+            cp -r ${./installer/test-fleet} $out
+            chmod -R u+w $out
+            cd $out
+            sed -i "s#WASISABI_URL#${targetLock.url}#" flake.nix
+            sed -i "s#CHANGEME_STATE_VERSION#${release}#" hosts/laptop/default.nix
+            install -m 0644 ${targetLock}/flake.lock flake.lock
+
+            # The host key, minted ahead of the machine, as my-boxes does.
+            ssh-keygen -q -t ed25519 -N "" -C laptop -f $TMPDIR/hostkey
+            cp $TMPDIR/hostkey.pub hosts/laptop/ssh_host_ed25519_key.pub
+            admin=$(age-keygen -y ${./installer/test-age-key.txt})
+            hostage=$(ssh-to-age < $TMPDIR/hostkey.pub)
+            cat > .sops.yaml <<EOF
+            keys:
+              - &admin $admin
+              - &host_laptop $hostage
+            creation_rules:
+              # The host's own key material: admin only (it cannot decrypt
+              # itself before it exists).
+              - path_regex: secrets/laptop/ssh-host-key$
+                key_groups:
+                  - age: [*admin]
+              - path_regex: secrets/laptop/[^/]+$
+                key_groups:
+                  - age: [*admin, *host_laptop]
+            EOF
+
+            mkdir -p secrets/laptop
+            export SOPS_AGE_KEY_FILE=${./installer/test-age-key.txt}
+            printf '%s' testpassword | mkpasswd -m yescrypt --stdin > $TMPDIR/hash
+            sops encrypt --input-type binary --output-type binary \
+              --filename-override secrets/laptop/user-password $TMPDIR/hash > secrets/laptop/user-password
+            sops encrypt --input-type binary --output-type binary \
+              --filename-override secrets/laptop/ssh-host-key $TMPDIR/hostkey > secrets/laptop/ssh-host-key
+
+            git init -q -b main
+            git add -A
+            git -c user.name=t -c user.email=t@t commit -q -m "A two-host fleet"
+          '';
+
+      restoreFleetAnswers = pkgs.writeText "wasisabi-autotest-answers-restore-fleet.json" (
+        builtins.toJSON {
+          "install:mode" = "restore";
+          "restore:source" = "${restoreFleetFixture}";
+          "restore:host" = "laptop";
+          "restore:ageKey" = lib.last (
+            lib.filter (l: lib.hasPrefix "AGE-SECRET-KEY-1" l) (
+              lib.splitString "\n" (builtins.readFile ./installer/test-age-key.txt)
+            )
+          );
+          "restore:repoPath" = "/home/tester/src/fleet";
+        }
+      );
 
       mkIso =
         {
@@ -134,6 +268,7 @@
               noctalia
               nixos-modules
               nixos-modules.inputs.wherever
+              sops-nix
               disko
               nixos-hardware
             ];
@@ -166,6 +301,51 @@
             cp ${./installer/test-hardware.nix} $out/hardware-configuration.nix
           '';
 
+      # The same, then put through the real secrets step exactly as the
+      # installer runs it, with the published test key. What comes out is the
+      # two-commit repo an installed machine starts from.
+      emittedWithSecrets =
+        pkgs.runCommand "wasisabi-emitted-flake-secrets"
+          {
+            nativeBuildInputs = [
+              pkgs.git
+              pkgs.mkpasswd
+            ];
+          }
+          ''
+            export HOME=$TMPDIR
+            root=$TMPDIR/target
+            repo=$root/home/wighawag/nixos
+            mkdir -p "$repo"
+            cp -r ${emitted}/. "$repo/"
+            chmod -R u+w "$repo"
+            git -C "$repo" init -q -b main
+            git -C "$repo" add -A
+            git -C "$repo" -c user.name=t -c user.email=t@t commit -q -m install
+            printf '%s' testpassword | mkpasswd -m yescrypt --stdin > $TMPDIR/hash
+            ${lib.getExe secretsTool} init --repo "$repo" --root "$root" --user wighawag \
+              --key-file ${./installer/test-age-key.txt} \
+              --password-hash-file $TMPDIR/hash --yes
+            test "$(git -C "$repo" rev-list --count HEAD)" = 2
+            test -s "$root/var/lib/sops-nix/key.txt"
+            test -s "$root/home/wighawag/.config/sops/age/keys.txt"
+            git -C "$repo" diff --quiet HEAD
+            rm -rf "$repo/.git"
+            cp -r "$repo" $out
+          '';
+
+      emittedSecretsSystem = nixpkgs.lib.nixosSystem {
+        inherit system;
+        specialArgs = {
+          wasisabi = self;
+        };
+        modules = [
+          self.nixosModules.wasisabi
+          home-manager.nixosModules.home-manager
+          "${emittedWithSecrets}/configuration.nix"
+        ];
+      };
+
       emittedSystem = nixpkgs.lib.nixosSystem {
         inherit system;
         specialArgs = {
@@ -188,6 +368,10 @@
         imports = [
           ./modules
           nixos-modules.nixosModules.default
+          # For wasisabi.secrets (modules/secrets.nix). A config that already
+          # imports sops-nix should make wasisabi's input follow its own, so
+          # both imports are the same path and the module system dedups them.
+          sops-nix.nixosModules.sops
         ];
       };
 
@@ -249,6 +433,14 @@
         offline = false;
         autotest = autotestAnswers "luks";
       };
+      nixosConfigurations.isoAutotestRestore = mkIso {
+        offline = false;
+        autotest = restoreAnswers;
+      };
+      nixosConfigurations.isoAutotestRestoreFleet = mkIso {
+        offline = false;
+        autotest = restoreFleetAnswers;
+      };
       nixosConfigurations.isoAutotestOffline = mkIso {
         offline = true;
         autotest = autotestAnswers "plain";
@@ -265,11 +457,16 @@
         installer = mkInstaller { offline = false; };
         questions = questionsJson;
         target-lock = targetLock;
+        wasisabi-secrets = secretsTool;
         iso-netinstall = self.nixosConfigurations.isoNetinstall.config.system.build.isoImage;
         iso-offline = self.nixosConfigurations.isoOffline.config.system.build.isoImage;
         iso-autotest = self.nixosConfigurations.isoAutotest.config.system.build.isoImage;
         iso-autotest-luks = self.nixosConfigurations.isoAutotestLuks.config.system.build.isoImage;
         iso-autotest-offline = self.nixosConfigurations.isoAutotestOffline.config.system.build.isoImage;
+        iso-autotest-restore = self.nixosConfigurations.isoAutotestRestore.config.system.build.isoImage;
+        restore-fixture = restoreFixture;
+        iso-autotest-restore-fleet = self.nixosConfigurations.isoAutotestRestoreFleet.config.system.build.isoImage;
+        restore-fleet-fixture = restoreFleetFixture;
       };
 
       checks.${system} =
@@ -414,13 +611,53 @@
               actual = c.services.xserver.xkb.variant;
             }
             {
+              name = "the flake's home is linked from /etc/nixos";
+              expected = "/home/wighawag/nixos";
+              actual = c.environment.etc.nixos.source;
+            }
+            {
+              name = "without the secrets step, no secrets are configured";
+              expected = null;
+              actual = c.wasisabi.secrets.sopsFile;
+            }
+            {
               name = "unanswered options are not written into the config";
               expected = false;
               actual = lib.hasInfix "wasisabi.editor" (builtins.readFile "${emitted}/configuration.nix");
             }
           ];
 
-          failures = lib.filter (e: e.actual != e.expected) expectations;
+          s = emittedSecretsSystem.config;
+          secretsExpectations = [
+            {
+              name = "the secrets step enables the secrets file";
+              expected = true;
+              actual = s.wasisabi.secrets.sopsFile != null;
+            }
+            {
+              name = "sops-nix reads the machine's age key, and only that";
+              expected = {
+                keyFile = "/var/lib/sops-nix/key.txt";
+                sshKeyPaths = [ ];
+              };
+              actual = {
+                inherit (s.sops.age) keyFile sshKeyPaths;
+              };
+            }
+            {
+              name = "the owner's password comes from the secret, decrypted before users exist";
+              expected = {
+                file = "/run/secrets-for-users/owner-password";
+                early = true;
+              };
+              actual = {
+                file = s.users.users.wighawag.hashedPasswordFile;
+                early = s.sops.secrets.owner-password.neededForUsers;
+              };
+            }
+          ];
+
+          failures = lib.filter (e: e.actual != e.expected) (expectations ++ secretsExpectations);
 
           report = lib.concatMapStringsSep "\n  " (
             e: "${e.name}: expected ${builtins.toJSON e.expected}, got ${builtins.toJSON e.actual}"
@@ -568,7 +805,8 @@
             pkgs.runCommand "wasisabi-installer-lint" { nativeBuildInputs = [ pkgs.shellcheck ]; }
               ''
                 shellcheck --shell=bash --severity=style \
-                  ${./installer/install.sh} ${./installer/emit.sh}
+                  ${./installer/install.sh} ${./installer/emit.sh} \
+                  ${./pkgs/wasisabi-secrets/wasisabi-secrets.sh}
                 touch $out
               '';
 
@@ -581,8 +819,15 @@
             # deliberately not building the desktop, which is what the VM
             # install test is for.
             echo ${builtins.hashString "sha256" emittedSystem.config.system.build.toplevel.drvPath} > $out
+            echo ${builtins.hashString "sha256" emittedSecretsSystem.config.system.build.toplevel.drvPath} >> $out
             cp ${emitted}/configuration.nix $out-config 2>/dev/null || true
           '';
+
+          # sops-nix's own validation of the secrets file the step wrote: it
+          # must parse as sops, and hold every secret the config declares.
+          # This is a BUILD, so it also proves sops-install-secrets builds
+          # against our nixpkgs.
+          emit-secrets = emittedSecretsSystem.config.system.build.sops-nix-users-manifest;
 
           # The offline ISO's claim, checked: every value of every enum
           # appears in some payload.
