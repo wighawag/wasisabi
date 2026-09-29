@@ -179,10 +179,18 @@
     connect-timeout = lib.mkIf offline 5;
   };
 
-  # NetworkManager rather than the minimal ISO's wpa_supplicant: `nmtui` is a
-  # text wifi picker that a person can actually use, and it is the same stack
-  # the installed machine will run.
-  networking.wireless.enable = lib.mkForce false;
+  # NetworkManager: `nmtui` is a text wifi picker that a person can actually
+  # use, and it is the same stack the installed machine will run.
+  #
+  # DO NOT TOUCH `networking.wireless.enable` HERE. NetworkManager's own module
+  # sets it to true: that is how its wpa_supplicant (D-Bus controlled, no
+  # interfaces of its own) gets installed at all. This file used to force it
+  # false, to turn off the minimal ISO's standalone wpa_supplicant, and so
+  # removed the one NetworkManager needs. Both media then had a wifi card,
+  # up, with firmware loaded, and no networks ever in range: NetworkManager
+  # logged "Failed to D-Bus activate wpa_supplicant service" every 13 seconds
+  # (seen on a ThinkPad T14s, ath11k). The installer profile no longer enables
+  # a standalone one, so there is nothing to turn off.
   networking.networkmanager.enable = true;
 
   # Firmware, so that wifi exists on the medium that needs to reach the

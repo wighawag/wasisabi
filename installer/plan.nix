@@ -273,6 +273,9 @@
     "system:secrets.ageKeyFile" = "Where the key lives is plumbing, not a preference; the default is where sops-nix documents it and where `wasisabi-secrets` puts it.";
     "system:secrets.ownerPassword" = "Follows from answering the Secrets question at all: an owner who sets secrets up gets a reinstallable password, and one who does not never reaches this option.";
     "system:restore.files" = "Not a question: it is read BY the restore mode, out of a config that already exists, and a fresh install has nothing encrypted to place.";
+    "system:agents.guide" = "Follows from the agent being enabled: without it the local model refuses to look at the machine it runs on. It is a seeded file the owner can edit or delete, not a preference to decide before seeing it.";
+    "system:agents.extraGuide" = "Free text for a particular machine's agent; nothing an installer can usefully ask for.";
+    "system:agents.searchFolder" = "A path, and the default (~/searches) is fine for everyone; it only names where search-bar sessions live.";
     "system:anon.accounts" = "A pool of account names with pinned uids is structure, not an answer; the defaults (anon, anon-john, anon-jane) are what every machine should start with, and changing the pool is a deliberate edit to configuration.nix.";
   };
 }

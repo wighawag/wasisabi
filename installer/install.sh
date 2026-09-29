@@ -368,6 +368,12 @@ apply_keymap() {
 
 # ── hardware detection ────────────────────────────────────────────────────
 
+# The live session's keyboard, as systemd-localed has it (Layout, Variant).
+# Empty when localed is not there to ask.
+live_x11() {
+  { localectl status 2>/dev/null || true; } | sed -n "s/^ *X11 $1: //p" | head -n 1 || true
+}
+
 detect_drm_modules() {
   # Early KMS for the Plymouth splash. This is hardware knowledge, so it
   # belongs to the machine's own config rather than to wasisabi's modules;
@@ -718,6 +724,23 @@ else
       if [ "$(jq -r '.key' <<<"$item")" = "extra:initrdKernelModules" ]; then
         item=$(jq --arg d "$(detect_drm_modules)" '.default = $d' <<<"$item")
       fi
+
+      # Offer the layout the live session is using: someone who picked one
+      # there (wasisabi-keyboard) has already said what this keyboard is.
+      # The variant only goes with the layout it belongs to.
+      case "$(jq -r '.key' <<<"$item")" in
+        system:keyboard.layout)
+          live_layout=$(live_x11 Layout)
+          if [ -n "$live_layout" ]; then
+            item=$(jq --arg d "$live_layout" '.default = $d' <<<"$item")
+          fi
+          ;;
+        system:keyboard.variant)
+          if [ "$(get_answer system:keyboard.layout)" = "$(live_x11 Layout)" ]; then
+            item=$(jq --arg d "$(live_x11 Variant)" '.default = $d' <<<"$item")
+          fi
+          ;;
+      esac
 
       ask_item "$item"
     done

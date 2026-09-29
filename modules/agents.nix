@@ -48,6 +48,28 @@ let
 
   torSocks = "socks5h://127.0.0.1:9050";
 
+  ownerHome = config.users.users.${cfg.user}.home or "/home/${cfg.user}";
+
+  # The owner agent's user-global AGENTS.md: where it is and what it may do
+  # (see wasisabi.agents.guide), plus whatever this machine adds.
+  guideFile = pkgs.writeText "AGENTS.md" (
+    builtins.readFile ./agents/AGENTS.md
+    + lib.optionalString (cfg.agents.extraGuide != "") ("\n" + cfg.agents.extraGuide)
+  );
+
+  # wherever expands a leading `~` itself; tmpfiles needs the real path.
+  searchDir =
+    let
+      f = cfg.agents.searchFolder;
+    in
+    if f == "~" then
+      ownerHome
+    else if lib.hasPrefix "~/" f then
+      ownerHome + lib.removePrefix "~" f
+    else
+      f;
+  searchBar = cfg.search.enable && cfg.agents.searchFolder != null;
+
   enrollScript = pkgs.writeShellScript "wasisabi-anon-enroll" ''
     # Idempotent, and self-healing, per declared account:
     #
@@ -134,14 +156,45 @@ lib.mkIf cfg.enable (
       nixos-modules.wherever = {
         enable = lib.mkDefault true;
         user = lib.mkDefault cfg.user;
+        # The search bar on wherever's home page: a question typed there
+        # becomes a session in this folder, with no project to create or pick
+        # first. Only with search on, since that is what its sessions are for.
+        # (`settings` is a plain attrs option, so this merges shallowly with a
+        # machine's own settings rather than replacing them.)
+        settings = lib.mkIf searchBar {
+          searchFolder = cfg.agents.searchFolder;
+        };
       };
 
       # webhands drives a browser (nixpkgs' free Chromium) from the command
       # line, for agents and people; the use-webhands skill documents it.
+      # pciutils and usbutils because the guide below tells the agent to
+      # diagnose hardware with `lspci -k` and `lsusb`, and NixOS ships neither.
       environment.systemPackages = [
         wp.memonaut
         wp.webhands
+        pkgs.pciutils
+        pkgs.usbutils
       ];
+
+      # SEEDED FILES, written when absent and then the owner's (`C` copies out
+      # of the store, which leaves a root-owned 0444 file, and `z` hands it to
+      # the owner, as nixos-modules' piUser does for settings.json).
+      #
+      # The search folder's AGENTS.md is seeded HERE, at boot, rather than left
+      # to wherever, because wherever seeds its own on the first search and its
+      # text is written for another setup: it names a skill this machine does
+      # not have and tells the agent to blame Ollama when a search fails.
+      systemd.tmpfiles.rules =
+        lib.optionals cfg.agents.guide [
+          "C ${ownerHome}/.pi/agent/AGENTS.md 0644 ${cfg.user} users - ${guideFile}"
+          "z ${ownerHome}/.pi/agent/AGENTS.md 0644 ${cfg.user} users -"
+        ]
+        ++ lib.optionals searchBar [
+          "d ${searchDir} 0700 ${cfg.user} users -"
+          "C ${searchDir}/AGENTS.md 0644 ${cfg.user} users - ${./agents/searches-AGENTS.md}"
+          "z ${searchDir}/AGENTS.md 0644 ${cfg.user} users -"
+        ];
     })
 
     # The owner reaches the socket-served services through their groups.

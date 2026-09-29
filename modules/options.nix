@@ -397,6 +397,51 @@
       '';
     };
 
+    agents.guide = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
+      description = ''
+        Give the owner's agent a user-global AGENTS.md (~/.pi/agent/AGENTS.md)
+        saying where it is: on the user's own computer, with real shell access,
+        on NixOS, and which commands diagnose wifi, sound, disks and the rest.
+
+        Without it the local model assumes it is a sandboxed coding assistant
+        and refuses to look at the machine at all (measured on the live ISO:
+        asked about wifi, it insisted its `ip addr` output came from "a virtual
+        machine", after running it on the user's laptop).
+
+        SEEDED, not declared: written once when the file is absent, then the
+        owner's to edit, the same as settings.json. So an existing AGENTS.md is
+        never touched, and a later change to this text does not reach a
+        machine that already has one (delete the file to get the current text
+        at the next boot).
+      '';
+    };
+
+    agents.extraGuide = lib.mkOption {
+      type = lib.types.lines;
+      default = "";
+      description = ''
+        Text appended to the seeded AGENTS.md (see `agents.guide`), for what a
+        particular machine needs its agent to know. The live ISO uses it to say
+        that it is a live session.
+      '';
+    };
+
+    agents.searchFolder = lib.mkOption {
+      type = lib.types.nullOr lib.types.str;
+      default = "~/searches";
+      description = ''
+        Where wherever's search bar starts its sessions: the box on its home
+        page that takes a question directly, with no project folder to create
+        or pick first. Each question becomes a session in this folder, whose
+        AGENTS.md (seeded here when absent, and only when search is enabled)
+        tells the agent to answer from the web, with sources.
+
+        `~` is the owner's home. null removes the search bar.
+      '';
+    };
+
     anon.enable = lib.mkOption {
       type = lib.types.bool;
       default = true;
