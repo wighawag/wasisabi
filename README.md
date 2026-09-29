@@ -1,11 +1,11 @@
-# wasi-sabi
+# wasisabi
 
 An opinionated, **libre-only** Wayland desktop
 distributed as NixOS + home-manager **modules**, so every default is an
 addressable, overridable option rather than a dotfile you must not touch.
 
 Not a distro: the modules are the product, an ISO is just a shortcut that
-installs them, and no knowledge of wasi-sabi is required to use the system —
+installs them, and no knowledge of wasisabi is required to use the system —
 or to leave it.
 
 ## The two rules
@@ -28,14 +28,14 @@ or to leave it.
 | Notifications | mako | MIT |
 | Lock / idle | swaylock + swayidle | MIT |
 | Terminal | Ghostty (or foot) | MIT |
-| Shell | bash + ble.sh, fzf, zoxide, atuin and a starship powerline prompt, one Catppuccin palette | BSD/MIT/ISC |
+| Shell | bash + ble.sh, fzf, zoxide, atuin and a starship powerline prompt (still in Catppuccin colours, see below) | BSD/MIT/ISC |
 | Editors | Neovim + Helix (both ship) | Apache-2.0/MPL |
 | Browser | Firefox (or LibreWolf/Chromium) | MPL |
 | Files | Thunar (or Nautilus) | GPL |
 | Passwords | KeePassXC — local-first | GPL |
 | Sync | Syncthing — P2P, self-hostable (optional) | MPL |
 | Media | mpv + imv | GPL/MIT |
-| Theme | Catppuccin Mocha | free |
+| Theme | Sumi: indigo ink and warm paper, from the enso wallpaper; Catppuccin Mocha as a choice | CC0 / MIT |
 | Local AI model | llama.cpp + Gemma 4 E4B, on the CPU, on a unix socket | MIT / Apache-2.0 |
 | Coding agent | pi, with wherever (a web UI for its sessions) | MIT / AGPL |
 | Search | SearXNG + webveil (no account, no profile) | AGPL |
@@ -138,7 +138,7 @@ sudo wasisabi-install
 
 It asks for the machine's identity (hostname, user, password, timezone, locale, **keyboard layout**), then for the disk, then whether to set up **encrypted secrets** (recommended, see below), and then offers wasisabi's own options: greeter, shell, terminal, browser, file manager, apps, services. Skip that last part and you get the defaults, which are not written into your config and therefore keep following the project.
 
-What it leaves behind is **an ordinary flake you own** at `~/nixos`, with `/etc/nixos` a link to it: `flake.nix`, `configuration.nix`, the `hardware-configuration.nix` it generated, a `flake.lock` pinned to exactly the revision the ISO installed, and with secrets set up, `.sops.yaml` and `secrets/secrets.yaml`. It is a git repo with two commits: the install, then the secrets. Nothing reads it back, nothing manages it, and removing the two module imports leaves you with a working NixOS machine that has never heard of wasi-sabi.
+What it leaves behind is **an ordinary flake you own** at `~/nixos`, with `/etc/nixos` a link to it: `flake.nix`, `configuration.nix`, the `hardware-configuration.nix` it generated, a `flake.lock` pinned to exactly the revision the ISO installed, and with secrets set up, `.sops.yaml` and `secrets/secrets.yaml`. It is a git repo with two commits: the install, then the secrets. Nothing reads it back, nothing manages it, and removing the two module imports leaves you with a working NixOS machine that has never heard of wasisabi.
 
 ### Your config repo
 
@@ -225,7 +225,7 @@ The installer fills in this same template, so the two paths cannot diverge.
 ## Adopting on an *existing* NixOS config
 
 The template scaffolds a fresh machine, but the same two modules compose into
-a config you already have — nothing about wasi-sabi requires owning the flake.
+a config you already have — nothing about wasisabi requires owning the flake.
 
 **1. Add the input**, following your nixpkgs so the module layers evaluate
 against *your* pin (they are plain modules: `pkgs` comes from whichever
@@ -356,26 +356,36 @@ The other two keyboards are the text ones. The option also switches on `console.
 | `Super+Shift+P` | Power off the monitors |
 | `Super+Escape` | Release keyboard shortcuts to the focused app |
 
+## The look
+
+One palette draws the whole machine: `wasisabi.theme`, set once on the system layer and followed by the home layer. The palettes are data, in [`theme/palettes.nix`](theme/palettes.nix):
+
+- **`sumi`** (墨, ink, the default) is sampled from the default wallpaper, an enso printed in indigo ink on warm paper, with a few pigment colours muted enough to sit on paper. The [website](https://wighawag.github.io/wasisabi-website/) uses the same values.
+- **`catppuccin-mocha`** is the previous default, kept as a choice.
+
+It reaches the boot splash, the greeter, Noctalia (as a palette file) or the classic Waybar/fuzzel/mako/swaylock, niri's focus ring, GTK3 and GTK4 apps, and the terminals; Helix follows through the terminal's own colours. `wasisabi.wallpaper` sets the desktop, lock screen and greeter background (default: the enso, CC0, see [`artwork/`](artwork/README.md)).
+
+Not yet: the shell prompt, `ls` colours and fzf are drawn by [nixos-modules](https://github.com/wighawag/nixos-modules)' interactive shell, which only knows Catppuccin so far, and Neovim keeps its own default colours.
+
+Noctalia's and the greeter's configs are **seeded, not owned**: a machine installed before this palette keeps the look it chose until you pick "wasisabi-sumi" in Noctalia's settings (the palette file is there either way).
+
 ## Boot appearance
 
-`wasisabi.splash.enable` (default true) turns on Plymouth with a Catppuccin
-Mocha theme and quiets the boot: no kernel messages, no `[ OK ]` unit lines.
-It does **not** hide failures. Password prompts, fsck questions and the
-emergency shell still appear, so a broken boot is still visible and still
-interactive. Set it to false if you would rather watch every unit start.
+`wasisabi.splash.enable` (default true) quiets the boot and shows a splash: under `sumi`, an enso that is painted as the machine starts (Plymouth learns how long boots take and paces the brush to it), its dry tail closing the circle as the boot ends. The same screen asks for the disk passphrase. Under Catppuccin it is the Catppuccin Plymouth theme.
 
-For the graphical splash to actually appear (rather than Plymouth falling back
-to printing the boot log), your GPU driver has to be in the initrd, which is
-hardware knowledge and therefore yours, not this module's:
+`wasisabi.splash.hideBootMenu` (default true) skips systemd-boot's menu, so the machine goes from the firmware logo straight to the splash. **Hold Space while it starts** to get the menu, which is how you boot an older generation to roll back.
+
+The splash hands over to the graphical greeter without a flash of console: plymouth is only deactivated at the end of the boot, so the finished enso stays up until the greeter draws over it, and quits afterwards. The ISOs' own boot menu (GRUB, UEFI) is themed from the wallpaper too.
+
+None of this hides failures. Password prompts, fsck questions and the emergency shell still appear, so a broken boot is still visible and still interactive. Set `wasisabi.splash.enable = false` if you would rather watch every unit start.
+
+For the graphical splash to actually appear (rather than Plymouth falling back to printing the boot log), your GPU driver has to be in the initrd, which is hardware knowledge and therefore yours, not this module's (the installer fills it in):
 
 ```nix
 boot.initrd.kernelModules = [ "amdgpu" ];   # or i915, nouveau, ...
 ```
 
-Most `nixos-hardware` profiles already do this. `hosts/demo.nix` does it for
-the VM's virtual GPU. Note that the splash is **not** verified to render inside
-QEMU: there you will most likely get a quiet boot with Plymouth showing the log
-instead of the themed screen.
+Most `nixos-hardware` profiles already do this. `hosts/demo.nix` does it for the VM's virtual GPU. The splash, the passphrase prompt and the handover were verified in QEMU (plain `virtio-vga`, filmed through QMP screendumps). One thing about testing it in a VM: the VM's kernel command line has `console=ttyS0`, and Plymouth deliberately falls back to text when it sees a serial console, so add `plymouth.ignore-serial-consoles` there. Real machines have no serial console and need nothing.
 
 ## Extending
 
@@ -384,9 +394,10 @@ instead of the themed screen.
 - Never use `mkForce` — that's how shared layers become hostile.
 - Keep hardware knowledge out of `modules/` and `home/` — that belongs to
   the user's layer (nixos-hardware etc.).
-- Keep the look in the portable layer. The Catppuccin palette in
-  `home/desktop.nix` themes the bar, launcher, notifications, lock screen and
-  GTK, none of which know what compositor they run under. Only the keybinds,
+- Keep the look in the portable layer. The palette (`theme/palettes.nix`,
+  read through `wasisabi.theme`) themes the bar, launcher, notifications,
+  lock screen and GTK, none of which know what compositor they run under. A
+  new colour role goes in every palette at once. Only the keybinds,
   the Waybar workspaces module and the portal set are compositor-specific.
 
 On a machine with no accelerated GPU driver, set `wasisabi.animations = false`:

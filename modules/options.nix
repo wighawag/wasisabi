@@ -1,4 +1,4 @@
-{ lib, ... }:
+{ lib, pkgs, ... }:
 
 {
   options.wasisabi = {
@@ -52,6 +52,44 @@
         This hides routine unit and kernel output, not failures: password
         prompts, fsck questions and the emergency shell still appear. Set to
         false if you would rather watch the boot.
+      '';
+    };
+
+    splash.hideBootMenu = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
+      description = ''
+        Skip systemd-boot's menu, so the machine goes from the firmware logo
+        straight to the splash. The menu is still there: HOLD SPACE while the
+        machine starts to see it, which is how you pick an older generation to
+        roll back to. Only applies with systemd-boot (the installer's
+        bootloader) and to installed systems; the ISOs keep their menu.
+      '';
+    };
+
+    theme = lib.mkOption {
+      type = lib.types.enum (lib.attrNames (import ../theme/palettes.nix));
+      default = "sumi";
+      description = ''
+        The palette the whole desktop is drawn in: boot splash, greeter,
+        shell, terminals, GTK, editors. Defined in theme/palettes.nix.
+
+        "sumi" (ink) is wasisabi's own, sampled from the default wallpaper:
+        indigo ink and warm paper. "catppuccin-mocha" is the previous default.
+
+        The home layer follows this value unless it sets its own.
+      '';
+    };
+
+    wallpaper = lib.mkOption {
+      type = lib.types.path;
+      default = "${pkgs.callPackage ../pkgs/wasisabi-artwork/package.nix { }}/share/backgrounds/wasisabi/enso.jpg";
+      defaultText = lib.literalExpression ''"''${wasisabi-artwork}/share/backgrounds/wasisabi/enso.jpg"'';
+      description = ''
+        The desktop's wallpaper, also used by the greeter and the lock screen.
+        The default is the enso risograph print (CC0, artwork/wallpapers).
+
+        The home layer follows this value unless it sets its own.
       '';
     };
 

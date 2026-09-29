@@ -27,7 +27,16 @@
 let
   cfg = config.wasisabi;
 
-  noctalia = pkgs.callPackage "${noctaliaSrc}/nix/package.nix" { };
+  # One patch to the shell's text: its first-run window greets the machine,
+  # not the shell ("Welcome", not "Welcome to Noctalia"). English only; other
+  # languages keep upstream's wording. --replace-fail, so an upstream rewording
+  # breaks the build instead of silently bringing the old title back.
+  noctalia = (pkgs.callPackage "${noctaliaSrc}/nix/package.nix" { }).overrideAttrs (old: {
+    postPatch = (old.postPatch or "") + ''
+      substituteInPlace assets/translations/en.json --replace-fail \
+        '"title": "Welcome to Noctalia",' '"title": "Welcome",'
+    '';
+  });
 
   # The seed. Deliberately MINIMAL: enough that a fresh machine looks right
   # (the font the rest of the desktop uses, a dark theme), and nothing else.
@@ -79,6 +88,42 @@ let
       '';
   };
 
+  # The palette (theme/palettes.nix via `wasisabi.theme`). Catppuccin is one
+  # of Noctalia's builtin palettes; sumi is shipped as a custom palette file
+  # in Noctalia's own format, from the same role mapping the greeter uses
+  # (theme/noctalia.nix), so the login screen and the shell match.
+  c = (import ../theme/palettes.nix).${cfg.theme};
+  sumi = cfg.theme == "sumi";
+  paletteName = "wasisabi-sumi";
+  roles = import ../theme/noctalia.nix c;
+  # primary -> mPrimary, on_surface_variant -> mOnSurfaceVariant
+  mName = role: "m" + lib.concatMapStrings
+    (w: lib.toUpper (lib.substring 0 1 w) + lib.substring 1 (-1) w)
+    (lib.splitString "_" role);
+  ansiNames = [ "black" "red" "green" "yellow" "blue" "magenta" "cyan" "white" ];
+  ansiSet = offset: lib.listToAttrs (lib.imap0
+    (i: n: lib.nameValuePair n "#${lib.elemAt c.ansi (i + offset)}") ansiNames);
+  paletteFile = (pkgs.formats.json { }).generate "${paletteName}.json" {
+    dark = lib.mapAttrs' (role: v: lib.nameValuePair (mName role) v) roles // {
+      terminal = {
+        background = "#${c.base}";
+        foreground = "#${c.text}";
+        cursor = "#${c.bright}";
+        cursorText = "#${c.base}";
+        selectionBg = "#${c.surface2}";
+        selectionFg = "#${c.bright}";
+        normal = ansiSet 0;
+        bright = ansiSet 8;
+      };
+    };
+  };
+
+  # The wallpaper link home/desktop.nix makes, at a path that does not change
+  # when the image does: this file is seeded once, so a store path in it would
+  # dangle after the next garbage collection.
+  wallpaperExt = let m = builtins.match ".*(\\.[A-Za-z0-9]+)" (toString cfg.wallpaper); in if m == null then "" else lib.head m;
+  wallpaperPath = "${config.xdg.dataHome}/wasisabi/wallpaper${wallpaperExt}";
+
   seed = pkgs.writeText "noctalia-config.toml" (''
     # Seeded ONCE by wasisabi on first login, then yours. Edit freely, in this
     # file or in Noctalia's settings GUI; nothing rewrites it.
@@ -87,6 +132,21 @@ let
 
     [theme]
     mode = "dark"
+  '' + (if sumi then ''
+    source = "custom"
+    custom_palette = "${paletteName}"
+  '' else ''
+    source = "builtin"
+    builtin = "Catppuccin"
+  '') + ''
+
+    [wallpaper]
+    enabled = true
+    fill_mode = "crop"
+    fill_color = "#${c.base}"
+
+    [wallpaper.default]
+    path = "${wallpaperPath}"
   '' + assistantBar);
 in
 {
@@ -100,6 +160,11 @@ in
 
   config = lib.mkIf (cfg.enable && cfg.shell == "noctalia") {
     home.packages = [ noctalia ];
+
+    # The palette file is ours and follows the flake, unlike config.toml: it
+    # only DEFINES a palette, and choosing another one in the settings is a
+    # config.toml change, which stays the user's.
+    xdg.configFile."noctalia/palettes/${paletteName}.json" = lib.mkIf sumi { source = paletteFile; };
 
     # Seed-if-absent. `-n` is the whole contract: present file wins, always.
     # Runs before home-manager's file linking so a first login has the config in

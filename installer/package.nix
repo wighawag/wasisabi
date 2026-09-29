@@ -125,7 +125,7 @@ symlinkJoin {
     secretsTool
   ];
   meta = {
-    description = "Interactive installer for a wasi-sabi machine";
+    description = "Interactive installer for a wasisabi machine";
     mainProgram = "wasisabi-install";
   };
 }

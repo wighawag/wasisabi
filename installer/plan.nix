@@ -190,6 +190,7 @@
         { option = "system:greetd.enable"; }
         { option = "system:greetd.greeter"; }
         { option = "system:splash.enable"; }
+        { option = "system:splash.hideBootMenu"; }
         {
           key = "extra:initrdKernelModules";
           kind = "strlist";
@@ -234,6 +235,7 @@
     {
       title = "Desktop";
       items = [
+        { option = "system:theme"; }
         { option = "home:shell"; }
         { option = "system:bash.enable"; }
         { option = "system:zellij.enable"; }
@@ -276,6 +278,9 @@
     "system:agents.guide" = "Follows from the agent being enabled: without it the local model refuses to look at the machine it runs on. It is a seeded file the owner can edit or delete, not a preference to decide before seeing it.";
     "system:agents.extraGuide" = "Free text for a particular machine's agent; nothing an installer can usefully ask for.";
     "system:agents.searchFolder" = "A path, and the default (~/searches) is fine for everyone; it only names where search-bar sessions live.";
+    "system:wallpaper" = "A path to an image, which a terminal installer cannot usefully show you; the default is the enso the whole theme was drawn from, and Noctalia's settings pick another one on the running desktop.";
+    "home:theme" = "Follows system:theme, which is asked under Desktop: one machine, one palette, unless a home deliberately sets its own in configuration.nix.";
+    "home:wallpaper" = "Follows system:wallpaper, for the same reason.";
     "system:anon.accounts" = "A pool of account names with pinned uids is structure, not an answer; the defaults (anon, anon-john, anon-jane) are what every machine should start with, and changing the pool is a deliberate edit to configuration.nix.";
   };
 }

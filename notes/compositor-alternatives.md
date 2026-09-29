@@ -1,6 +1,6 @@
 # Compositor alternatives
 
-Why wasi-sabi ships niri, what the runners-up were, and what it would cost to add one back. Written 2026-09-10 against nixpkgs `nixos-unstable` (the flake pin) and upstream release data fetched the same day. Versions below are what *this flake* would actually build, not what upstream has tagged.
+Why wasisabi ships niri, what the runners-up were, and what it would cost to add one back. Written 2026-09-10 against nixpkgs `nixos-unstable` (the flake pin) and upstream release data fetched the same day. Versions below are what *this flake* would actually build, not what upstream has tagged.
 
 Everything considered here is FSF-free, so rule 1 of this project does not narrow the field at all. The choice is about maintenance, ergonomics and taste.
 
@@ -22,7 +22,7 @@ Sway 1.12 (25 May 2026, 138 changes from 50 contributors, MIT) is the most conse
 
 **The "we can add the looks later" idea needs care.** Aesthetics on Wayland lives in three layers, and only two of them are addable:
 
-- **Layer A, client-side chrome:** bar, launcher, notifications, wallpaper, lock screen, GTK/Qt theme, cursors, fonts, terminal. Entirely compositor-independent. This is where most of the visual identity lives, and in wasi-sabi it is already isolated: the Catppuccin palette in `home/desktop.nix` feeds Waybar, mako, fuzzel, swaylock and GTK, and none of it knows what compositor is running. **This is the part worth protecting, and it survives any compositor swap.**
+- **Layer A, client-side chrome:** bar, launcher, notifications, wallpaper, lock screen, GTK/Qt theme, cursors, fonts, terminal. Entirely compositor-independent. This is where most of the visual identity lives, and in wasisabi it is already isolated: the Catppuccin palette in `home/desktop.nix` feeds Waybar, mako, fuzzel, swaylock and GTK, and none of it knows what compositor is running. **This is the part worth protecting, and it survives any compositor swap.**
 - **Layer B, compositor-drawn effects:** rounded corners, blur, shadows, animations, workspace overview. **There is no plugin API for Sway and upstream rejects these features by design.** You cannot add them with a package. It is fork-or-nothing.
 - **Layer C, protocol-driven effects:** `ext-background-effect-v1`, where the client asks and the compositor obliges. Sway does not implement it. Neither does Hyprland (as of the version tested upstream). niri does.
 

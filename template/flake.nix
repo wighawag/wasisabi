@@ -1,5 +1,5 @@
 {
-  description = "My machine on wasi-sabi";
+  description = "My machine on wasisabi";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";

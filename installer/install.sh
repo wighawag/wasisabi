@@ -673,7 +673,7 @@ if [ -n "$ANSWERS_IN" ]; then
 else
   clear
   gum style --border rounded --padding "1 3" --border-foreground 141 \
-    "$(gum style --bold 'wasi-sabi')" \
+    "$(gum style --bold 'wasisabi')" \
     "an opinionated, libre-only Wayland desktop" \
     "" \
     "This asks for your machine's identity, then for wasisabi's own" \

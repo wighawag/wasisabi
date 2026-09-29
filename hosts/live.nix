@@ -49,7 +49,7 @@ let
     clear
     cat <<'MSG'
 
-      wasi-sabi live: this machine has no usable GPU (no /dev/dri/renderD*),
+      wasisabi live: this machine has no usable GPU (no /dev/dri/renderD*),
       and the desktop needs one, so it was not started.
 
       You can still install:   sudo wasisabi-install
@@ -153,7 +153,7 @@ let
     # Lines kept short: this opens in a tiled, half-width terminal.
     cat <<'MSG'
 
-      Welcome to the wasi-sabi live session.
+      Welcome to the wasisabi live session.
 
       It runs from the USB stick and from RAM.
       Nothing is written to this computer's
@@ -190,7 +190,7 @@ let
     else
       lib.getExe pkgs.foot;
 
-  tuigreet = "${lib.getExe pkgs.tuigreet} --time --greeting 'wasi-sabi live: user nixos, no password.  Install: sudo wasisabi-install' --cmd ${liveSession}";
+  tuigreet = "${lib.getExe pkgs.tuigreet} --time --greeting 'wasisabi live: user nixos, no password.  Install: sudo wasisabi-install' --cmd ${liveSession}";
 in
 {
   networking.hostName = "wasisabi-live";
@@ -213,7 +213,7 @@ in
   wasisabi.agents.extraGuide = ''
     ## This is the live session
 
-    This computer is running wasi-sabi from a USB stick, from memory, as the user `nixos`. Nothing is written to its disks and nothing done here survives a reboot, so there is no `~/nixos` configuration to change: a fix that should last belongs in the installed system. To install: `sudo wasisabi-install`, in a terminal. To change the keyboard layout: `wasisabi-keyboard`, in a terminal.
+    This computer is running wasisabi from a USB stick, from memory, as the user `nixos`. Nothing is written to its disks and nothing done here survives a reboot, so there is no `~/nixos` configuration to change: a fix that should last belongs in the installed system. To install: `sudo wasisabi-install`, in a terminal. To change the keyboard layout: `wasisabi-keyboard`, in a terminal.
 
     Here `sudo` needs no password in a terminal, and is refused in the web UI. Still ask before using it.
   '';
@@ -272,7 +272,7 @@ in
 
     systemd.user.services.wasisabi-live-welcome = {
       Unit = {
-        Description = "wasi-sabi live welcome";
+        Description = "wasisabi live welcome";
         After = [ "graphical-session.target" ];
         PartOf = [ "graphical-session.target" ];
       };

@@ -12,24 +12,58 @@
 let
   cfg = config.wasisabi;
 
-  # Catppuccin Mocha palette — single source of truth for the whole theme.
-  # Deliberately compositor-independent: it themes the bar, launcher,
-  # notifications, lock screen and GTK, none of which know what compositor
-  # they are running under.
-  c = rec {
-    base = "1e1e2e";
-    mantle = "181825";
-    surface0 = "313244";
-    surface1 = "45475a";
-    text = "cdd6f4";
-    subtext1 = "bac2de";
-    mauve = "cba6f7";
-    blue = "89b4fa";
-    green = "a6e3a1";
-    red = "f38ba8";
-    peach = "fab387";
-    overlay0 = "6c7086";
-  };
+  # The palette, from theme/palettes.nix via `wasisabi.theme` (sumi by
+  # default, Catppuccin Mocha as a choice). Compositor-independent: it themes
+  # the bar, launcher, notifications, lock screen and GTK, none of which know
+  # what compositor they are running under.
+  c = (import ../theme/palettes.nix).${cfg.theme};
+  sumi = cfg.theme == "sumi";
+
+  # The wallpaper at a path that survives the image changing (see
+  # wallpaperPath in modules/desktop.nix for why a store path will not do).
+  wallpaperExt = let m = builtins.match ".*(\\.[A-Za-z0-9]+)" (toString cfg.wallpaper); in if m == null then "" else lib.head m;
+  wallpaperFile = "wasisabi/wallpaper${wallpaperExt}";
+  wallpaperPath = "${config.xdg.dataHome}/${wallpaperFile}";
+
+  # Sumi for GTK3 (adw-gtk3) and GTK4 (libadwaita): their named colours.
+  gtkColours = ''
+    @define-color accent_color #${c.highlight};
+    @define-color accent_bg_color #${c.highlight};
+    @define-color accent_fg_color #${c.base};
+    @define-color destructive_color #${c.urgent};
+    @define-color destructive_bg_color #${c.urgent};
+    @define-color destructive_fg_color #${c.base};
+    @define-color success_color #${c.success};
+    @define-color success_bg_color #${c.success};
+    @define-color success_fg_color #${c.base};
+    @define-color warning_color #${c.warning};
+    @define-color warning_bg_color #${c.warning};
+    @define-color warning_fg_color #${c.base};
+    @define-color error_color #${c.urgent};
+    @define-color error_bg_color #${c.urgent};
+    @define-color error_fg_color #${c.base};
+    @define-color window_bg_color #${c.base};
+    @define-color window_fg_color #${c.text};
+    @define-color view_bg_color #${c.mantle};
+    @define-color view_fg_color #${c.text};
+    @define-color headerbar_bg_color #${c.surface0};
+    @define-color headerbar_fg_color #${c.text};
+    @define-color headerbar_border_color #${c.surface1};
+    @define-color headerbar_backdrop_color #${c.base};
+    @define-color headerbar_shade_color rgba(0, 0, 0, 0.36);
+    @define-color card_bg_color #${c.surface0};
+    @define-color card_fg_color #${c.text};
+    @define-color card_shade_color rgba(0, 0, 0, 0.36);
+    @define-color dialog_bg_color #${c.surface0};
+    @define-color dialog_fg_color #${c.text};
+    @define-color popover_bg_color #${c.surface0};
+    @define-color popover_fg_color #${c.text};
+    @define-color sidebar_bg_color #${c.mantle};
+    @define-color sidebar_fg_color #${c.text};
+    @define-color sidebar_backdrop_color #${c.mantle};
+    @define-color secondary_sidebar_bg_color #${c.crust};
+    @define-color secondary_sidebar_fg_color #${c.text};
+  '';
 
   # niri names the primary modifier once, and every bind then says "Mod".
   # That is why the binds below never interpolate the mod key.
@@ -134,7 +168,7 @@ lib.mkIf cfg.enable {
         background-color = "#${c.base}";
         focus-ring = {
           width = 2;
-          active-color = "#${c.mauve}";
+          active-color = "#${c.focus}";
           inactive-color = "#${c.surface1}";
         };
       };
@@ -303,7 +337,7 @@ lib.mkIf cfg.enable {
         min-height: 0;
       }
       window#waybar {
-        background: rgba(30, 30, 46, 0.9);
+        background: alpha(#${c.base}, 0.9);
         color: #${c.text};
       }
       #workspaces button {
@@ -311,17 +345,17 @@ lib.mkIf cfg.enable {
         color: #${c.overlay0};
       }
       #workspaces button.focused {
-        color: #${c.mauve};
+        color: #${c.highlight};
       }
       #workspaces button.active {
-        color: #${c.subtext1};
+        color: #${c.subtext};
       }
       #workspaces button.urgent {
-        color: #${c.red};
+        color: #${c.urgent};
       }
-      #battery.warning { color: #${c.peach}; }
-      #battery.critical { color: #${c.red}; }
-      #clock { font-weight: bold; color: #${c.blue}; }
+      #battery.warning { color: #${c.warning}; }
+      #battery.critical { color: #${c.urgent}; }
+      #clock { font-weight: bold; color: #${c.highlight}; }
       widget > * { padding: 0 6px; }
     '';
   };
@@ -333,7 +367,7 @@ lib.mkIf cfg.enable {
       anchor = "top-right";
       background-color = "#${c.base}EE";
       text-color = "#${c.text}";
-      border-color = "#${c.blue}";
+      border-color = "#${c.info}";
       border-radius = 8;
       border-size = 1;
       default-timeout = 4000;
@@ -349,10 +383,10 @@ lib.mkIf cfg.enable {
     [colors]
     background=${c.base}ee
     text=${c.text}ff
-    match=${c.mauve}ff
+    match=${c.highlight}ff
     selection=${c.surface0}ff
     selection-text=${c.text}ff
-    border=${c.blue}ff
+    border=${c.info}ff
   ''; };
 
   # ─── Lock screen ───
@@ -364,6 +398,10 @@ lib.mkIf cfg.enable {
     settings = {
       daemonize = true;
       show-failed-attempts = true;
+      # The wallpaper behind the ring, as on the Noctalia lock screen; `color`
+      # stays as what shows if the image cannot be read.
+      image = wallpaperPath;
+      scaling = "fill";
       indicator-radius = 100;
       indicator-thickness = 8;
       color = c.base;
@@ -371,10 +409,10 @@ lib.mkIf cfg.enable {
       inside-ver-color = c.surface0;
       inside-wrong-color = c.surface0;
       ring-color = c.surface1;
-      ring-ver-color = c.blue;
-      ring-wrong-color = c.red;
-      key-hl-color = c.mauve;
-      bs-hl-color = c.red;
+      ring-ver-color = c.info;
+      ring-wrong-color = c.urgent;
+      key-hl-color = c.highlight;
+      bs-hl-color = c.urgent;
       text-color = c.text;
       text-ver-color = c.text;
       text-wrong-color = c.text;
@@ -416,15 +454,51 @@ lib.mkIf cfg.enable {
   };
 
   # ─── GTK theme ───
+  # Sumi has no GTK theme of its own, and does not need one: adw-gtk3 is
+  # libadwaita's look for GTK3 apps, and both it and libadwaita draw from
+  # NAMED colours that a user stylesheet can redefine. So one list of
+  # @define-color lines, written for GTK3 and GTK4 alike, recolours Thunar
+  # and Nautilus the same way. The accent is the palette's highlight (ochre),
+  # the colour of the current workspace and the launcher's match.
   gtk = {
     enable = true;
-    theme = {
-      name = "Catppuccin-Mocha-Standard-Mauve-Dark";
-      package = pkgs.catppuccin-gtk;
-    };
+    theme =
+      if sumi then {
+        name = "adw-gtk3-dark";
+        package = pkgs.adw-gtk3;
+      } else {
+        name = "Catppuccin-Mocha-Standard-Mauve-Dark";
+        package = pkgs.catppuccin-gtk;
+      };
     iconTheme = {
       name = "Papirus-Dark";
       package = pkgs.papirus-icon-theme;
     };
+    gtk3.extraCss = lib.mkIf sumi gtkColours;
+    gtk4.extraCss = lib.mkIf sumi gtkColours;
+  };
+
+  # libadwaita ignores the GTK theme name and asks for a colour scheme
+  # instead. Both palettes are dark. (Noctalia sets the same key from its own
+  # mode; this is what the classic shell gets.)
+  dconf.settings."org/gnome/desktop/interface".color-scheme = "prefer-dark";
+
+  # ─── Wallpaper ───
+  # A stable path for it: Noctalia's seeded config and swaylock point here.
+  xdg.dataFile.${wallpaperFile}.source = cfg.wallpaper;
+
+  # Under the classic shell nothing else draws a wallpaper, so swaybg does,
+  # as a user service bound to the session like the rest of the stack.
+  systemd.user.services.swaybg = lib.mkIf (!noctalia) {
+    Unit = {
+      Description = "Wallpaper";
+      PartOf = [ "graphical-session.target" ];
+      After = [ "graphical-session.target" ];
+    };
+    Service = {
+      ExecStart = "${lib.getExe pkgs.swaybg} --mode fill --color '#${c.base}' --image ${wallpaperPath}";
+      Restart = "on-failure";
+    };
+    Install.WantedBy = [ "graphical-session.target" ];
   };
 }

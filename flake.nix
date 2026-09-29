@@ -1,5 +1,5 @@
 {
-  description = "wasi-sabi — an opinionated, libre-only Wayland desktop, distributed as NixOS + home-manager modules";
+  description = "wasisabi: an opinionated, libre-only Wayland desktop, distributed as NixOS + home-manager modules";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
@@ -846,7 +846,7 @@
       #   nix flake new -t github:wighawag/wasisabi ~/systems/my-laptop
       templates.default = {
         path = ./template;
-        description = "A new machine on wasi-sabi: fill in your username, drop in hardware-configuration.nix, rebuild.";
+        description = "A new machine on wasisabi: fill in your username, drop in hardware-configuration.nix, rebuild.";
       };
     };
 }

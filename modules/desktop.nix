@@ -8,6 +8,35 @@ let
 
   noctaliaGreeter = cfg.greetd.enable && cfg.greetd.greeter == "noctalia";
 
+  palette = (import ../theme/palettes.nix).${cfg.theme};
+
+  # The wallpaper at a path that does not change when the image does: the
+  # greeter's state keeps the path, and a store path there would dangle as
+  # soon as the old image is garbage-collected. The extension is kept, for
+  # loaders that go by it.
+  wallpaperExt = let m = builtins.match ".*(\\.[A-Za-z0-9]+)" (toString cfg.wallpaper); in if m == null then "" else lib.head m;
+  wallpaperPath = "/etc/wasisabi/wallpaper${wallpaperExt}";
+
+  # The greeter's look, as the file its own Sync writes: palette, wallpaper,
+  # dark mode. SEEDED, not owned (see the tmpfiles rules below), so a user
+  # who later syncs their Noctalia look to the greeter still can.
+  greeterConfig = (pkgs.formats.toml { }).generate "noctalia-greeter.toml" {
+    appearance.hide_logo = true;
+  };
+
+  greeterSeed = (pkgs.formats.toml { }).generate "noctalia-greeter-sync.toml" {
+    appearance = {
+      scheme = "Synced";
+      theme_mode = "dark";
+      palette = import ../theme/noctalia.nix palette;
+      wallpaper = {
+        path = wallpaperPath;
+        fill_mode = "crop";
+        fill_color = "#${palette.base}";
+      };
+    };
+  };
+
   # THE ANON ACCOUNTS ARE NOT DESKTOP USERS, so the greeter does not offer
   # them. They have no password (they are entered with `sudo anonctl use`,
   # which changes uid without one), so picking one could only ever fail; and
@@ -19,19 +48,30 @@ let
   # has no setting to exclude one: its only filter is a hard-coded set of
   # system names, which this extends. `--replace-fail` makes an upstream change
   # to that line fail the build instead of silently listing them again.
-  greeterPackage =
-    if cfg.anon.enable && cfg.anon.accounts != { } then
-      pkgs.noctalia-greeter.overrideAttrs (old: {
-        postPatch = (old.postPatch or "") + ''
-          substituteInPlace src/greeter/greeter_surface.cpp --replace-fail \
-            '"greeter", "greetd", "sddm", "lightdm", "gdm", "nobody",' \
-            '"greeter", "greetd", "sddm", "lightdm", "gdm", "nobody", ${
-              lib.concatMapStrings (a: "\"${a}\", ") (lib.attrNames cfg.anon.accounts)
-            }'
-        '';
-      })
-    else
-      pkgs.noctalia-greeter;
+  anonNames = lib.optionals (cfg.anon.enable && cfg.anon.accounts != { }) (lib.attrNames cfg.anon.accounts);
+
+  # The greeter's compositor paints every screen black before the greeter
+  # has drawn anything (render_output_black). That black frame sat between
+  # the boot splash and the login screen, so it is painted in the palette's
+  # base instead: the splash's ink goes straight on into the greeter's.
+  # --replace-fail, again, so an upstream change breaks the build loudly.
+  clearColour = let
+    ch = i: toString (lib.fromHexString (lib.substring i 2 palette.base) / 255.0);
+  in "{${ch 0}f, ${ch 2}f, ${ch 4}f, 1.0f}";
+
+  greeterPackage = pkgs.noctalia-greeter.overrideAttrs (old: {
+    postPatch = (old.postPatch or "") + ''
+      substituteInPlace src/compositor/noctalia_compositor.c --replace-fail \
+        '.color = {0.0f, 0.0f, 0.0f, 1.0f},' \
+        '.color = ${clearColour},'
+    '' + lib.optionalString (anonNames != [ ]) ''
+      substituteInPlace src/greeter/greeter_surface.cpp --replace-fail \
+        '"greeter", "greetd", "sddm", "lightdm", "gdm", "nobody",' \
+        '"greeter", "greetd", "sddm", "lightdm", "gdm", "nobody", ${
+          lib.concatMapStrings (a: "\"${a}\", ") anonNames
+        }'
+    '';
+  });
 
   # greetd launches `noctalia-greeter-session` -- the WRAPPER, not the
   # `noctalia-greeter` binary: the wrapper starts the bundled wlroots
@@ -91,6 +131,37 @@ lib.mkIf cfg.enable {
       mode = "0750";
     };
   };
+
+  # The greeter's look, installed as the greeter's own files before it starts.
+  # A unit rather than tmpfiles C/z rules: the directory belongs to the
+  # greeter, and tmpfiles refuses to chown root-copied files inside it
+  # ("unsafe path transition"), which left sync.toml read-only to the greeter
+  # that has to write it.
+  #
+  #   greeter.toml  the admin half, which Sync never touches, so it is OURS
+  #                 and rewritten on every boot: only what wasisabi decides
+  #                 (the Noctalia mascot stays off, so the login screen is the
+  #                 wallpaper and the form).
+  #   sync.toml     palette, wallpaper, dark mode, in the file the greeter's
+  #                 own Sync writes. SEEDED, installed only if absent: the
+  #                 greeter writes it too (last session, last scheme) and a
+  #                 user's Noctalia Sync replaces it, so owning it would undo
+  #                 both on every boot.
+  systemd.services.noctalia-greeter-seed = lib.mkIf noctaliaGreeter {
+    description = "Seed the greeter's appearance";
+    wantedBy = [ "greetd.service" ];
+    before = [ "greetd.service" ];
+    after = [ "systemd-tmpfiles-setup.service" ];
+    serviceConfig.Type = "oneshot";
+    path = [ pkgs.coreutils ];
+    script = ''
+      d=/var/lib/noctalia-greeter
+      install -m 0640 -o greeter -g greeter ${greeterConfig} "$d/greeter.toml"
+      [ -e "$d/sync.toml" ] || install -m 0640 -o greeter -g greeter ${greeterSeed} "$d/sync.toml"
+    '';
+  };
+
+  environment.etc."wasisabi/wallpaper${wallpaperExt}".source = cfg.wallpaper;
 
   services.greetd = lib.mkIf cfg.greetd.enable {
     enable = lib.mkDefault true;

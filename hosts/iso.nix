@@ -70,6 +70,14 @@
   );
 
   isoImage = {
+    # The UEFI boot menu, drawn like the website's first screen: the enso
+    # wallpaper, darkened on the left, and the menu set in the dark half.
+    # (Legacy BIOS boots keep syslinux's plain menu: the installer needs UEFI
+    # anyway.)
+    grubTheme = pkgs.callPackage ../pkgs/wasisabi-grub-theme/package.nix {
+      wasisabi-artwork = pkgs.callPackage ../pkgs/wasisabi-artwork/package.nix { };
+    };
+
     volumeID = lib.mkForce (if autotest != null then "WASISABI_TEST" else "WASISABI");
     # The offline image is mostly nix store, which is exactly what zstd is
     # good at; the default is already zstd but at a level tuned for a small
@@ -207,7 +215,7 @@
 
   services.getty.helpLine = lib.mkForce ''
 
-        wasi-sabi installer
+        wasisabi installer
 
         Run:  sudo wasisabi-install
         Wifi: sudo nmtui
