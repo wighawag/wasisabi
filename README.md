@@ -129,6 +129,8 @@ Log in as `demo` / `demo`. Use `Alt+*` keybinds (host desktops eat `Super`).
 
 ### With the ISO
 
+Download one from [wasisabi.org](https://wasisabi.org) (the live ISO, or the smaller netinstall one), or build it yourself from any release tag:
+
 ```sh
 nix build github:wighawag/wasisabi#iso-netinstall   # small, needs a network
 nix build github:wighawag/wasisabi#iso-offline      # LIVE: try it first; carries everything, installs with no network
@@ -403,8 +405,26 @@ Most `nixos-hardware` profiles already do this. `hosts/demo.nix` does it for the
 On a machine with no accelerated GPU driver, set `wasisabi.animations = false`:
 under llvmpipe every animation frame is a full-screen CPU blit. The demo VM
 already does this.
+## Releases
+
+The ISOs are downloaded from a Cloudflare R2 bucket served at `downloads.wasisabi.org`, one folder per version, plus a `releases.json` listing what is there, which the website reads live. [`scripts/release.sh`](scripts/release.sh) is the whole process:
+
+```sh
+git tag v0.2.0 && git push origin v0.2.0
+scripts/release.sh publish 0.2.0 --dry-run   # builds, checksums, shows every upload and deletion
+scripts/release.sh publish 0.2.0             # ... and does them; keeps only the newest version
+scripts/release.sh publish 0.2.0 --keep 3    # keeps the newest three instead
+scripts/release.sh delete 0.1.0              # removes one version
+scripts/release.sh list
+```
+
+`publish` builds both ISOs from the tag on GitHub (the netinstall image rebuilt from `v0.1.0` came out byte-identical to the published one), uploads them with a `SHA256SUMS`, and writes the checksums into the GitHub release's notes as well, so a tampered bucket cannot also rewrite GitHub. Only the newest version is kept by default, because an offline ISO is about 9 GB of storage; a deleted version is never lost, since its tag rebuilds it. It needs an R2 API token (Object Read & Write, this bucket only) as `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID` and `R2_SECRET_ACCESS_KEY`, in the environment or in `~/.config/wasisabi/r2.env`.
+
+The one-time Cloudflare setup (bucket, domain, CORS, upload key) and the reasons behind all this: [`notes/releasing.md`](notes/releasing.md).
+
 ## Notes
 
+- [`notes/releasing.md`](notes/releasing.md): where the ISOs are published, the one-time Cloudflare setup, and a release step by step.
 - [`notes/agents.md`](notes/agents.md): the agent layer (local model, search,
   pi and wherever, anonymous accounts), its design and what is verified.
 - [`notes/installer.md`](notes/installer.md) — how the ISO and installer work,

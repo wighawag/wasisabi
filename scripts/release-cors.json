@@ -1,0 +1,10 @@
+{
+  "rules": [
+    {
+      "allowed": {
+        "origins": ["https://wasisabi.org", "https://www.wasisabi.org", "https://wighawag.github.io", "http://localhost:5173", "http://localhost:4791"],
+        "methods": ["GET", "HEAD"]
+      }
+    }
+  ]
+}
