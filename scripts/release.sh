@@ -83,8 +83,11 @@ run() { if [ "$dry" = 1 ]; then echo "would run: $*" >&2; else "$@"; fi; }
 work=$(mktemp -d); trap 'rm -rf "$work"' EXIT
 
 # The current list, straight from the bucket (the public URL may be cached).
+# `rclone cat` on a missing object succeeds with no output (it treats the path
+# as an empty directory), so an empty result means "no index yet", not "broken".
 fetch_index() {
-  if [ -n "${R2_ACCESS_KEY_ID:-}" ] && rclone cat "$r2/releases.json" > "$work/releases.json" 2> /dev/null; then
+  if [ -n "${R2_ACCESS_KEY_ID:-}" ] && rclone cat "$r2/releases.json" > "$work/releases.json" 2> /dev/null \
+     && [ -s "$work/releases.json" ]; then
     jq -e '.releases | type == "array"' "$work/releases.json" > /dev/null || die "releases.json in the bucket is malformed; fix it by hand"
   else
     echo '{"releases":[]}' > "$work/releases.json"
